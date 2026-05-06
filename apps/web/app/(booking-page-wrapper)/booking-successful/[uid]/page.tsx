@@ -1,9 +1,8 @@
 "use client";
 
-import { useParams } from "next/navigation";
-
 import dayjs from "@calcom/dayjs";
-import { DecoyBookingSuccessCard } from "~/bookings/components/DecoyBookingSuccessCard";
+import { useParams } from "next/navigation";
+import { BookingSuccessCard } from "~/bookings/components/BookingSuccessCard";
 import { useDecoyBooking } from "~/bookings/hooks/useDecoyBooking";
 
 export default function BookingSuccessful() {
@@ -34,7 +33,7 @@ export default function BookingSuccessful() {
   const attendeeEmail = booking.booker?.email || null;
 
   return (
-    <DecoyBookingSuccessCard
+    <BookingSuccessCard
       title={booking.title || "Booking"}
       formattedDate={formattedDate}
       formattedTime={formattedTime}

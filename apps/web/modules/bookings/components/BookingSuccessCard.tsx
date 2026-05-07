@@ -3,6 +3,7 @@ import { useLocale } from "@calcom/lib/hooks/useLocale";
 import { Avatar } from "@calcom/ui/components/avatar";
 import { Badge } from "@calcom/ui/components/badge";
 import { CheckIcon } from "@coss/ui/icons";
+import { BookingSuccessLocationRow } from "./BookingSuccessLocationRow";
 
 export interface BookingSuccessCardInvitee {
   name?: string | null;
@@ -127,13 +128,7 @@ export function BookingSuccessCard({
                 </dd>
               </div>
 
-              {/* Location row — full variants land in a follow-up story */}
-              {location && (
-                <div className="flex items-start gap-3" data-testid="booking-success-location-placeholder">
-                  <dt className="text-subtle w-20 shrink-0 font-medium">{t("where")}</dt>
-                  <dd className="text-default min-w-0">{t("web_conferencing_details_to_follow")}</dd>
-                </div>
-              )}
+              <BookingSuccessLocationRow location={location} />
             </dl>
           </section>
 

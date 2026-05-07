@@ -1,51 +1,68 @@
-"use client";
-
 import dayjs from "@calcom/dayjs";
-import { useParams } from "next/navigation";
+import getBookingInfo from "@calcom/features/bookings/lib/getBookingInfo";
+import type { PageProps as _PageProps } from "app/_types";
 import { BookingSuccessCard } from "~/bookings/components/BookingSuccessCard";
-import { useDecoyBooking } from "~/bookings/hooks/useDecoyBooking";
+import { BookingSuccessDecoyFallback } from "~/bookings/components/BookingSuccessDecoyFallback";
 
-export default function BookingSuccessful() {
-  const params = useParams();
+export const metadata = {
+  robots: {
+    index: false,
+    follow: false,
+  },
+};
 
-  const uid = params?.uid as string;
-  const bookingData = useDecoyBooking(uid);
+export default async function BookingSuccessful({ params }: _PageProps) {
+  const resolved = await params;
+  const uid = typeof resolved.uid === "string" ? resolved.uid : "";
 
-  if (!bookingData) {
-    return null;
+  if (!uid) {
+    return <BookingSuccessDecoyFallback uid="" />;
   }
 
-  const { booking } = bookingData;
+  const { bookingInfo } = await getBookingInfo(uid);
 
-  // Format the data for the BookingSuccessCard
-  const startTime = booking.startTime ? dayjs(booking.startTime) : null;
-  const endTime = booking.endTime ? dayjs(booking.endTime) : null;
-  const timeZone = booking.booker?.timeZone || booking.host?.timeZone || dayjs.tz.guess();
+  if (!bookingInfo) {
+    return <BookingSuccessDecoyFallback uid={uid} />;
+  }
+
+  const startTime = bookingInfo.startTime ? dayjs(bookingInfo.startTime) : null;
+  const endTime = bookingInfo.endTime ? dayjs(bookingInfo.endTime) : null;
+  const timeZone = bookingInfo.attendees[0]?.timeZone || bookingInfo.user?.timeZone || dayjs.tz.guess();
 
   const formattedDate = startTime ? startTime.tz(timeZone).format("dddd, MMMM D, YYYY") : "";
   const formattedTime = startTime ? startTime.tz(timeZone).format("h:mm A") : "";
   const formattedEndTime = endTime ? endTime.tz(timeZone).format("h:mm A") : "";
-  const formattedTimeZone = timeZone;
 
-  const hostName = booking.host?.name || null;
-  const hostEmail = null; // Email not stored for spam decoy bookings
-  const attendeeName = booking.booker?.name || null;
-  const attendeeEmail = booking.booker?.email || null;
+  const attendee = bookingInfo.attendees[0] ?? null;
+  const additionalInvitees = bookingInfo.attendees.slice(1).map((a) => ({
+    name: a.name,
+    email: a.email,
+  }));
+
+  const hideOrganizerEmail = bookingInfo.eventType?.hideOrganizerEmail ?? false;
+  const hostEmail = hideOrganizerEmail
+    ? null
+    : (bookingInfo.userPrimaryEmail ?? bookingInfo.user?.email ?? null);
+
+  const startTimeIso = startTime ? startTime.toISOString() : new Date().toISOString();
+  const endTimeIso = endTime ? endTime.toISOString() : startTimeIso;
 
   return (
     <BookingSuccessCard
-      title={booking.title || "Booking"}
+      title={bookingInfo.title || "Booking"}
       formattedDate={formattedDate}
       formattedTime={formattedTime}
       endTime={formattedEndTime}
-      formattedTimeZone={formattedTimeZone}
-      hostName={hostName}
+      formattedTimeZone={timeZone}
+      hostName={bookingInfo.user?.name ?? null}
       hostEmail={hostEmail}
-      attendeeName={attendeeName}
-      attendeeEmail={attendeeEmail}
-      location={booking.location || null}
-      startTime={booking.startTime}
-      rawEndTime={booking.endTime}
+      hostAvatarUrl={bookingInfo.user?.avatarUrl ?? null}
+      attendeeName={attendee?.name ?? null}
+      attendeeEmail={attendee?.email ?? null}
+      additionalInvitees={additionalInvitees}
+      location={bookingInfo.location || null}
+      startTime={startTimeIso}
+      rawEndTime={endTimeIso}
     />
   );
 }

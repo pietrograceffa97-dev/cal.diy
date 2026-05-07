@@ -55,7 +55,7 @@ export function BookingSuccessCard({
   const calendarOrganizer = hostEmail ? { name: hostName, email: hostEmail } : undefined;
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen" data-testid="success-page">
       <main className="mx-auto max-w-3xl px-4 py-10 sm:py-16">
         <div
           className="bg-default dark:bg-cal-muted border-booker border-booker-width overflow-hidden rounded-lg sm:rounded-xl"

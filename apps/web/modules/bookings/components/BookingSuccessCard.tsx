@@ -3,6 +3,7 @@ import { useLocale } from "@calcom/lib/hooks/useLocale";
 import { Avatar } from "@calcom/ui/components/avatar";
 import { Badge } from "@calcom/ui/components/badge";
 import { CheckIcon } from "@coss/ui/icons";
+import { BookingSuccessAddToCalendar } from "./BookingSuccessAddToCalendar";
 import { BookingSuccessLocationRow } from "./BookingSuccessLocationRow";
 
 export interface BookingSuccessCardInvitee {
@@ -23,6 +24,8 @@ export interface BookingSuccessCardProps {
   attendeeEmail: string | null;
   additionalInvitees?: BookingSuccessCardInvitee[];
   location: string | null;
+  startTime: Date | string;
+  rawEndTime: Date | string;
 }
 
 export function BookingSuccessCard({
@@ -38,10 +41,18 @@ export function BookingSuccessCard({
   attendeeEmail,
   additionalInvitees,
   location,
+  startTime,
+  rawEndTime,
 }: BookingSuccessCardProps) {
   const { t } = useLocale();
 
   const hostDisplayName = hostName ?? t("host");
+
+  const calendarAttendees = [
+    attendeeEmail ? { name: attendeeName, email: attendeeEmail } : null,
+    ...(additionalInvitees?.map((invitee) => ({ name: invitee.name ?? null, email: invitee.email })) ?? []),
+  ].filter((a): a is { name: string | null; email: string } => a !== null);
+  const calendarOrganizer = hostEmail ? { name: hostName, email: hostEmail } : undefined;
 
   return (
     <div className="min-h-screen">
@@ -132,8 +143,18 @@ export function BookingSuccessCard({
             </dl>
           </section>
 
-          {/* Action buttons (add-to-calendar, reschedule, cancel) — wired in follow-up stories */}
-          <div data-testid="booking-success-actions-placeholder" />
+          <div
+            className="border-subtle flex flex-wrap items-center gap-3 border-t px-6 py-6 sm:px-10"
+            data-testid="booking-success-actions">
+            <BookingSuccessAddToCalendar
+              title={title}
+              startTime={startTime}
+              endTime={rawEndTime}
+              location={location}
+              attendees={calendarAttendees}
+              organizer={calendarOrganizer}
+            />
+          </div>
         </div>
       </main>
     </div>

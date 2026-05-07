@@ -19,20 +19,33 @@ export const enum CalendarLinkType {
   ICS = "ics",
 }
 
-const buildICalLink = ({
+export interface ICalAttendee {
+  name?: string | null;
+  email: string;
+}
+
+export const buildICalLink = ({
   startTime,
   endTime,
   title,
   description,
   location,
+  attendees,
+  organizer,
 }: {
   startTime: Dayjs;
   endTime: Dayjs;
   title: string;
   description: string | null;
   location: string | null;
+  attendees?: ICalAttendee[];
+  organizer?: ICalAttendee;
 }) => {
   const durationInMinutes = endTime.diff(startTime, "minutes");
+
+  const normalizedAttendees = attendees
+    ?.filter((a) => !!a?.email)
+    .map((a) => ({ name: a.name ?? a.email, email: a.email }));
 
   const iCalEvent = createEvent({
     start: [
@@ -49,6 +62,8 @@ const buildICalLink = ({
     },
     ...(description ? { description } : {}),
     ...(location ? { location } : {}),
+    ...(organizer?.email ? { organizer: { name: organizer.name ?? organizer.email, email: organizer.email } } : {}),
+    ...(normalizedAttendees && normalizedAttendees.length > 0 ? { attendees: normalizedAttendees } : {}),
   });
 
   if (iCalEvent.error) {
@@ -58,7 +73,7 @@ const buildICalLink = ({
   return `data:text/calendar,${encodeURIComponent(iCalEvent.value ? iCalEvent.value : false)}`;
 };
 
-const buildGoogleCalendarLink = ({
+export const buildGoogleCalendarLink = ({
   startTime,
   endTime,
   eventName,
@@ -87,7 +102,7 @@ const buildGoogleCalendarLink = ({
   return googleCalendarLink;
 };
 
-const buildMicrosoftOfficeLink = ({
+export const buildMicrosoftOfficeLink = ({
   startTime,
   endTime,
   eventName,
@@ -112,7 +127,7 @@ const buildMicrosoftOfficeLink = ({
   return microsoftOfficeLink;
 };
 
-const buildMicrosoftOutlookLink = ({
+export const buildMicrosoftOutlookLink = ({
   startTime,
   endTime,
   eventName,

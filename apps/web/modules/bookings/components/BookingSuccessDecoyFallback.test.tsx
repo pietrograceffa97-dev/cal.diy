@@ -17,6 +17,10 @@ vi.mock("../hooks/useDecoyBooking", () => ({
   useDecoyBooking: vi.fn(),
 }));
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
+
 import { useDecoyBooking } from "../hooks/useDecoyBooking";
 
 describe("BookingSuccessDecoyFallback", () => {

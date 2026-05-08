@@ -5,6 +5,7 @@ import { useLocale } from "@calcom/lib/hooks/useLocale";
 import { Avatar } from "@calcom/ui/components/avatar";
 import { Badge } from "@calcom/ui/components/badge";
 import { CheckIcon } from "@coss/ui/icons";
+import { BookingSuccessActions } from "./BookingSuccessActions";
 import { BookingSuccessAddToCalendar } from "./BookingSuccessAddToCalendar";
 import { BookingSuccessLocationRow } from "./BookingSuccessLocationRow";
 
@@ -14,6 +15,7 @@ export interface BookingSuccessCardInvitee {
 }
 
 export interface BookingSuccessCardProps {
+  uid: string;
   title: string;
   formattedDate: string;
   formattedTime: string;
@@ -31,6 +33,7 @@ export interface BookingSuccessCardProps {
 }
 
 export function BookingSuccessCard({
+  uid,
   title,
   formattedDate,
   formattedTime,
@@ -156,6 +159,17 @@ export function BookingSuccessCard({
               attendees={calendarAttendees}
               organizer={calendarOrganizer}
             />
+            {uid && (
+              <BookingSuccessActions
+                uid={uid}
+                title={title}
+                formattedDate={formattedDate}
+                formattedTime={formattedTime}
+                formattedEndTime={endTime}
+                formattedTimeZone={formattedTimeZone}
+                rescheduledBy={attendeeEmail}
+              />
+            )}
           </div>
         </div>
       </main>

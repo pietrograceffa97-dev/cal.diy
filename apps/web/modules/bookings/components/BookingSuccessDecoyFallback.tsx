@@ -23,6 +23,7 @@ export function BookingSuccessDecoyFallback({ uid }: { uid: string }) {
 
   return (
     <BookingSuccessCard
+      uid={uid}
       title={booking.title || "Booking"}
       formattedDate={formattedDate}
       formattedTime={formattedTime}

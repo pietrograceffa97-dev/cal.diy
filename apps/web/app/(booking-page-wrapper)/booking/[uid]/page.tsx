@@ -53,7 +53,12 @@ export const generateMetadata = async ({ params, searchParams }: _PageProps) => 
 };
 
 const BOOLEAN_ACTION_PARAMS = ["cancel", "reschedule", "changes"] as const;
-const SEAT_PARAMS = ["seatReferenceUid"] as const;
+// Non-empty string params that should keep the user on the legacy view:
+// - seatReferenceUid: the legacy view surfaces the seat-specific attendee
+// - redirect_status: Stripe 3DS off-site redirect lands here with a payment status
+//   that the legacy view branches on (see bookings-single-view.tsx). Without this,
+//   a failed/pending payment would redirect to "You're booked!".
+const STRING_ACTION_PARAMS = ["seatReferenceUid", "redirect_status"] as const;
 
 function hasActionMode(searchParams: Awaited<_PageProps["searchParams"]>): boolean {
   const hasBoolean = BOOLEAN_ACTION_PARAMS.some((key) => {
@@ -61,7 +66,7 @@ function hasActionMode(searchParams: Awaited<_PageProps["searchParams"]>): boole
     return value === "true" || (Array.isArray(value) && value.includes("true"));
   });
   if (hasBoolean) return true;
-  return SEAT_PARAMS.some((key) => {
+  return STRING_ACTION_PARAMS.some((key) => {
     const value = searchParams[key];
     if (typeof value === "string") return value.length > 0;
     if (Array.isArray(value)) return value.some((v) => typeof v === "string" && v.length > 0);

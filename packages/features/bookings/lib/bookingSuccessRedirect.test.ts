@@ -1,10 +1,8 @@
-import { describe, it, expect, vi, beforeEach, test } from "vitest";
-
 import { useIsEmbed } from "@calcom/embed-core/embed-iframe";
 import { useCompatSearchParams } from "@calcom/lib/hooks/useCompatSearchParams";
 import { navigateInTopWindow } from "@calcom/lib/navigateInTopWindow";
-
-import { useBookingSuccessRedirect, getNewSearchParams } from "./bookingSuccessRedirect";
+import { beforeEach, describe, expect, it, test, vi } from "vitest";
+import { getNewSearchParams, useBookingSuccessRedirect } from "./bookingSuccessRedirect";
 
 const mockPush = vi.fn();
 
@@ -397,7 +395,7 @@ describe("useBookingSuccessRedirect", () => {
   describe("internal redirects to booking page", () => {
     describe("URL structure", () => {
       test.each([
-        { isEmbed: false, expectedPath: "/booking/test-booking-uid?" },
+        { isEmbed: false, expectedPath: "/booking-successful/test-booking-uid?" },
         { isEmbed: true, expectedPath: "/booking/test-booking-uid/embed?" },
       ])("redirects to $expectedPath when isEmbed is $isEmbed", ({ isEmbed, expectedPath }) => {
         vi.mocked(useIsEmbed).mockReturnValue(isEmbed);

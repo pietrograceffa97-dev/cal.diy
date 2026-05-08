@@ -243,7 +243,8 @@ export const useBookingSuccessRedirect = () => {
       query,
       searchParams: new URLSearchParams(headersRelatedSearchParams),
     });
-    return router.push(`/booking/${booking.uid}${isEmbed ? "/embed" : ""}?${newSearchParams.toString()}`);
+    const internalPath = isEmbed ? `/booking/${booking.uid}/embed` : `/booking-successful/${booking.uid}`;
+    return router.push(`${internalPath}?${newSearchParams.toString()}`);
   };
 
   return bookingSuccessRedirect;

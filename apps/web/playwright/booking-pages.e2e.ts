@@ -543,7 +543,7 @@ test.describe("Event type with disabled cancellation and rescheduling", () => {
 
     await expect(page.locator("[data-testid=success-page]")).toBeVisible();
 
-    await page.waitForURL((url) => url.pathname === `/booking/${bookingId}`);
+    await page.waitForURL((url) => url.pathname === `/booking-successful/${bookingId}`);
   });
 
   test("Using rescheduleUid query parameter should redirect to success page", async ({ page }) => {
@@ -551,7 +551,7 @@ test.describe("Event type with disabled cancellation and rescheduling", () => {
 
     await expect(page.locator("[data-testid=success-page]")).toBeVisible();
 
-    await page.waitForURL((url) => url.pathname === `/booking/${bookingId}`);
+    await page.waitForURL((url) => url.pathname === `/booking-successful/${bookingId}`);
   });
 
   test("Should prevent cancellation and show an error message", async ({ page }) => {

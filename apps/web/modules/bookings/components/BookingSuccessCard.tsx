@@ -61,15 +61,11 @@ export function BookingSuccessCard({
 
   return (
     <div className="min-h-screen" data-testid="success-page">
-      <main className="mx-auto max-w-3xl px-4 py-10 sm:py-16">
-        <div
-          className="bg-default dark:bg-cal-muted border-booker border-booker-width overflow-hidden rounded-lg sm:rounded-xl"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="booking-success-headline">
-          <header className="px-6 pb-6 pt-8 text-center sm:px-10 sm:pt-10">
+      <main className="mx-auto max-w-3xl px-4 py-6 sm:py-16" aria-labelledby="booking-success-headline">
+        <div className="bg-default dark:bg-cal-muted border-booker border-booker-width overflow-hidden rounded-lg sm:rounded-xl">
+          <header className="px-6 pb-6 pt-6 text-center sm:px-10 sm:pt-10">
             <div className="bg-cal-success mx-auto flex h-12 w-12 items-center justify-center rounded-full">
-              <CheckIcon className="h-5 w-5 text-green-600 dark:text-green-400" />
+              <CheckIcon className="h-5 w-5 text-green-700 dark:text-green-400" aria-hidden="true" />
             </div>
             <h1 id="booking-success-headline" className="text-emphasis mt-6 text-2xl font-semibold leading-7">
               {t("youre_booked")}

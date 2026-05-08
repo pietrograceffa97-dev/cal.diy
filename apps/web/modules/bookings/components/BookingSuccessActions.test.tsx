@@ -38,11 +38,28 @@ vi.mock("@calcom/ui/components/dialog", async () => {
       children,
       title,
       description,
+      onOpenAutoFocus,
       ...rest
-    }: Children & { title?: string; description?: string } & Record<string, unknown>) => {
+    }: Children & {
+      title?: string;
+      description?: string;
+      onOpenAutoFocus?: (e: Event) => void;
+    } & Record<string, unknown>) => {
       const { type: _type, preventCloseOnOutsideClick: _p, ...domProps } = rest;
+      const ref = React.useRef<HTMLDivElement | null>(null);
+      // Mirror Radix's Dialog: invoke onOpenAutoFocus once after mount so the
+      // component's "focus the safe escape" handler runs in jsdom too. Without
+      // this, the auto-focus path that protects keyboard users from
+      // accidentally confirming the destructive action is silently skipped.
+      React.useEffect(() => {
+        if (!onOpenAutoFocus) return;
+        const event = new Event("focus", { cancelable: true }) as Event & {
+          preventDefault: () => void;
+        };
+        onOpenAutoFocus(event);
+      }, [onOpenAutoFocus]);
       return (
-        <div role="dialog" aria-label={title} {...(domProps as Record<string, unknown>)}>
+        <div ref={ref} role="dialog" aria-label={title} {...(domProps as Record<string, unknown>)}>
           {title && <h2>{title}</h2>}
           {description && <p>{description}</p>}
           {children}
@@ -236,6 +253,17 @@ describe("BookingSuccessActions", () => {
     fireEvent.click(keep);
     expect(screen.queryByTestId("mock-dialog")).not.toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("auto-focuses the safe 'Keep meeting' escape on dialog open (so Enter does not confirm cancellation)", () => {
+    render(<BookingSuccessActions {...baseProps} />);
+    fireEvent.click(screen.getByTestId("booking-success-cancel"));
+
+    const keep = screen.getByTestId("booking-success-cancel-keep");
+    // The component's onOpenAutoFocus handler calls keepMeetingButtonRef.focus().
+    // The dialog mock invokes onOpenAutoFocus on mount so we can verify in jsdom
+    // that the destructive confirm did not get focus first.
+    expect(document.activeElement).toBe(keep);
   });
 
   it("aborts cancel and surfaces an error if the CSRF endpoint returns no token", async () => {

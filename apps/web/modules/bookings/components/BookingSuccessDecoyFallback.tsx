@@ -1,7 +1,7 @@
 "use client";
 
 import dayjs from "@calcom/dayjs";
-import { useDecoyBooking } from "~/bookings/hooks/useDecoyBooking";
+import { useDecoyBooking } from "../hooks/useDecoyBooking";
 import { BookingSuccessCard } from "./BookingSuccessCard";
 
 export function BookingSuccessDecoyFallback({ uid }: { uid: string }) {
@@ -30,8 +30,10 @@ export function BookingSuccessDecoyFallback({ uid }: { uid: string }) {
       formattedTimeZone={timeZone}
       hostName={booking.host?.name || null}
       hostEmail={null}
+      hostAvatarUrl={null}
       attendeeName={booking.booker?.name || null}
       attendeeEmail={booking.booker?.email || null}
+      additionalInvitees={[]}
       location={booking.location || null}
       startTime={booking.startTime}
       rawEndTime={booking.endTime}

@@ -1,6 +1,8 @@
 import { loadTranslations } from "@calcom/i18n/server";
+import { BookingStatus } from "@calcom/prisma/enums";
 import { buildLegacyCtx } from "@lib/buildLegacyCtx";
 import type { PageProps as _PageProps } from "app/_types";
+import { _generateMetadata } from "app/_utils";
 import { CustomI18nProvider } from "app/CustomI18nProvider";
 import { withAppDirSsr } from "app/WithAppDirSsr";
 import { cookies, headers } from "next/headers";
@@ -13,19 +15,57 @@ import {
 
 const getData = withAppDirSsr<ClientPageProps>(getServerSideProps);
 
-export const metadata = {
+const NOINDEX_METADATA = {
   robots: {
     index: false,
     follow: false,
   },
+} as const;
+
+export const generateMetadata = async ({ params, searchParams }: _PageProps) => {
+  const resolvedParams = await params;
+  const resolvedSearch = await searchParams;
+  const uid = typeof resolvedParams.uid === "string" ? resolvedParams.uid : "";
+
+  if (!uid || !hasActionMode(resolvedSearch)) {
+    return NOINDEX_METADATA;
+  }
+
+  const { bookingInfo, eventType, recurringBookings } = await getData(
+    buildLegacyCtx(await headers(), await cookies(), resolvedParams, resolvedSearch)
+  );
+  const needsConfirmation = bookingInfo.status === BookingStatus.PENDING && eventType.requiresConfirmation;
+
+  const metadata = await _generateMetadata(
+    (t) =>
+      t(`booking_${needsConfirmation ? "submitted" : "confirmed"}${recurringBookings ? "_recurring" : ""}`),
+    (t) =>
+      t(`booking_${needsConfirmation ? "submitted" : "confirmed"}${recurringBookings ? "_recurring" : ""}`),
+    false,
+    process.env.NEXT_PUBLIC_WEBAPP_URL ?? "",
+    `/booking/${uid}`
+  );
+
+  return {
+    ...metadata,
+    ...NOINDEX_METADATA,
+  };
 };
 
-const ACTION_PARAMS = ["cancel", "reschedule", "changes"] as const;
+const BOOLEAN_ACTION_PARAMS = ["cancel", "reschedule", "changes"] as const;
+const SEAT_PARAMS = ["seatReferenceUid"] as const;
 
 function hasActionMode(searchParams: Awaited<_PageProps["searchParams"]>): boolean {
-  return ACTION_PARAMS.some((key) => {
+  const hasBoolean = BOOLEAN_ACTION_PARAMS.some((key) => {
     const value = searchParams[key];
     return value === "true" || (Array.isArray(value) && value.includes("true"));
+  });
+  if (hasBoolean) return true;
+  return SEAT_PARAMS.some((key) => {
+    const value = searchParams[key];
+    if (typeof value === "string") return value.length > 0;
+    if (Array.isArray(value)) return value.some((v) => typeof v === "string" && v.length > 0);
+    return false;
   });
 }
 

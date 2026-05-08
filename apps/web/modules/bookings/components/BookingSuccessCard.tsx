@@ -118,8 +118,14 @@ export function BookingSuccessCard({
                 <dd className="text-default flex min-w-0 flex-col gap-3">
                   {attendeeName && (
                     <div>
-                      <p className="text-emphasis font-medium">{attendeeName}</p>
-                      {attendeeEmail && <p className="text-subtle">{attendeeEmail}</p>}
+                      <p className="text-emphasis font-medium" data-testid={`attendee-name-${attendeeName}`}>
+                        {attendeeName}
+                      </p>
+                      {attendeeEmail && (
+                        <p className="text-subtle" data-testid={`attendee-email-${attendeeEmail}`}>
+                          {attendeeEmail}
+                        </p>
+                      )}
                     </div>
                   )}
                   {hostName && (
@@ -133,8 +139,16 @@ export function BookingSuccessCard({
                   )}
                   {additionalInvitees?.map((invitee) => (
                     <div key={invitee.email}>
-                      {invitee.name && <p className="text-emphasis font-medium">{invitee.name}</p>}
-                      <p className="text-subtle">{invitee.email}</p>
+                      {invitee.name && (
+                        <p
+                          className="text-emphasis font-medium"
+                          data-testid={`attendee-name-${invitee.name}`}>
+                          {invitee.name}
+                        </p>
+                      )}
+                      <p className="text-subtle" data-testid={`attendee-email-${invitee.email}`}>
+                        {invitee.email}
+                      </p>
                     </div>
                   ))}
                 </dd>

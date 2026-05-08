@@ -4,7 +4,7 @@ import { getPlaceholderAvatar } from "@calcom/lib/defaultAvatarImage";
 import { useLocale } from "@calcom/lib/hooks/useLocale";
 import { Avatar } from "@calcom/ui/components/avatar";
 import { Badge } from "@calcom/ui/components/badge";
-import { CheckIcon } from "@coss/ui/icons";
+import { CheckIcon, XIcon } from "@coss/ui/icons";
 import { BookingSuccessActions } from "./BookingSuccessActions";
 import { BookingSuccessAddToCalendar } from "./BookingSuccessAddToCalendar";
 import { BookingSuccessLocationRow } from "./BookingSuccessLocationRow";
@@ -35,6 +35,12 @@ export interface BookingSuccessCardProps {
   // `profile.name` (team name for team/collective events, host name otherwise).
   // Falls back to `hostName` if not provided.
   confirmationApproverName?: string | null;
+  // True when the booking is in CANCELLED or REJECTED status. Switches the
+  // success card into a destructive "event canceled" state and suppresses the
+  // reschedule / cancel actions, since they no longer apply.
+  isCancelled?: boolean;
+  cancellationReason?: string | null;
+  cancelledBy?: string | null;
 }
 
 export function BookingSuccessCard({
@@ -55,14 +61,22 @@ export function BookingSuccessCard({
   rawEndTime,
   needsConfirmation = false,
   confirmationApproverName,
+  isCancelled = false,
+  cancellationReason,
+  cancelledBy,
 }: BookingSuccessCardProps) {
   const { t } = useLocale();
 
   const hostDisplayName = hostName ?? t("host");
   const approverName = confirmationApproverName ?? hostName;
 
-  const headline = needsConfirmation ? t("booking_submitted") : t("youre_booked");
+  const headline = (() => {
+    if (isCancelled) return t("event_cancelled");
+    if (needsConfirmation) return t("booking_submitted");
+    return t("youre_booked");
+  })();
   const subtitle = (() => {
+    if (isCancelled) return null;
     if (needsConfirmation) {
       return approverName
         ? t("user_needs_to_confirm_or_reject_booking", { user: approverName })
@@ -89,14 +103,25 @@ export function BookingSuccessCard({
           aria-labelledby="booking-success-headline">
           <header
             className="px-6 pb-6 pt-8 text-center sm:px-10 sm:pt-10"
-            data-needs-confirmation={needsConfirmation || undefined}>
-            <div className="bg-cal-success mx-auto flex h-12 w-12 items-center justify-center rounded-full">
-              <CheckIcon className="h-5 w-5 text-green-600 dark:text-green-400" />
+            data-needs-confirmation={needsConfirmation || undefined}
+            data-cancelled={isCancelled || undefined}>
+            <div
+              className={`mx-auto flex h-12 w-12 items-center justify-center rounded-full ${
+                isCancelled ? "bg-error" : "bg-cal-success"
+              }`}>
+              {isCancelled ? (
+                <XIcon className="h-5 w-5 text-red-600 dark:text-red-200" />
+              ) : (
+                <CheckIcon className="h-5 w-5 text-green-600 dark:text-green-400" />
+              )}
             </div>
-            <h1 id="booking-success-headline" className="text-emphasis mt-6 text-2xl font-semibold leading-7">
+            <h1
+              id="booking-success-headline"
+              className="text-emphasis mt-6 text-2xl font-semibold leading-7"
+              data-testid={isCancelled ? "cancelled-headline" : undefined}>
               {headline}
             </h1>
-            <p className="text-default mt-3 text-sm leading-5">{subtitle}</p>
+            {subtitle && <p className="text-default mt-3 text-sm leading-5">{subtitle}</p>}
           </header>
 
           <section
@@ -162,33 +187,49 @@ export function BookingSuccessCard({
                 </dd>
               </div>
 
-              <BookingSuccessLocationRow location={location} />
+              {!isCancelled && <BookingSuccessLocationRow location={location} />}
+
+              {isCancelled && cancellationReason && (
+                <div className="flex items-start gap-3">
+                  <dt className="text-subtle w-20 shrink-0 font-medium">{t("reason")}</dt>
+                  <dd className="text-default min-w-0 break-words">{cancellationReason}</dd>
+                </div>
+              )}
+
+              {isCancelled && cancelledBy && (
+                <div className="flex items-start gap-3">
+                  <dt className="text-subtle w-20 shrink-0 font-medium">{t("cancelled_by")}</dt>
+                  <dd className="text-default min-w-0 break-words">{cancelledBy}</dd>
+                </div>
+              )}
             </dl>
           </section>
 
-          <div
-            className="border-subtle flex flex-wrap items-center gap-3 border-t px-6 py-6 sm:px-10"
-            data-testid="booking-success-actions">
-            <BookingSuccessAddToCalendar
-              title={title}
-              startTime={startTime}
-              endTime={rawEndTime}
-              location={location}
-              attendees={calendarAttendees}
-              organizer={calendarOrganizer}
-            />
-            {uid && (
-              <BookingSuccessActions
-                uid={uid}
+          {!isCancelled && (
+            <div
+              className="border-subtle flex flex-wrap items-center gap-3 border-t px-6 py-6 sm:px-10"
+              data-testid="booking-success-actions">
+              <BookingSuccessAddToCalendar
                 title={title}
-                formattedDate={formattedDate}
-                formattedTime={formattedTime}
-                formattedEndTime={endTime}
-                formattedTimeZone={formattedTimeZone}
-                rescheduledBy={attendeeEmail}
+                startTime={startTime}
+                endTime={rawEndTime}
+                location={location}
+                attendees={calendarAttendees}
+                organizer={calendarOrganizer}
               />
-            )}
-          </div>
+              {uid && (
+                <BookingSuccessActions
+                  uid={uid}
+                  title={title}
+                  formattedDate={formattedDate}
+                  formattedTime={formattedTime}
+                  formattedEndTime={endTime}
+                  formattedTimeZone={formattedTimeZone}
+                  rescheduledBy={attendeeEmail}
+                />
+              )}
+            </div>
+          )}
         </div>
       </main>
     </div>

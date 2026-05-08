@@ -53,6 +53,20 @@ export default async function BookingSuccessful({ params }: _PageProps) {
   const needsConfirmation =
     bookingInfo.status === BookingStatus.PENDING && Boolean(bookingInfo.eventType?.requiresConfirmation);
 
+  const isCancelled =
+    bookingInfo.status === BookingStatus.CANCELLED || bookingInfo.status === BookingStatus.REJECTED;
+
+  // Mirror the legacy success view: rejection reason and cancellation reason
+  // share the same UI slot — REJECTED bookings store the reason on
+  // `rejectionReason`, CANCELLED bookings on `cancellationReason`.
+  const cancellationReason = bookingInfo.cancellationReason || bookingInfo.rejectionReason || null;
+  // Suppress cancelledBy when the event hides the organizer email. The legacy
+  // view also exempted the host from this guard (`!isHost`), but that requires
+  // session context this server component doesn't have — fall back to the safe
+  // side and hide for everyone, since leaking the organizer email when the
+  // event is configured to hide it is the worse failure mode.
+  const cancelledBy = hideOrganizerEmail ? null : (bookingInfo.cancelledBy ?? null);
+
   // Mirror the legacy success view's `profile.name` source: prefer the team
   // name for team/collective events and fall back to the assigned host so the
   // awaiting-confirmation subtitle reads naturally on round-robin bookings
@@ -78,6 +92,9 @@ export default async function BookingSuccessful({ params }: _PageProps) {
       rawEndTime={endTimeIso}
       needsConfirmation={needsConfirmation}
       confirmationApproverName={confirmationApproverName}
+      isCancelled={isCancelled}
+      cancellationReason={cancellationReason}
+      cancelledBy={cancelledBy}
     />
   );
 

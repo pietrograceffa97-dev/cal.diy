@@ -56,6 +56,12 @@ const getUserBooking = async (uid: string) => {
           schedulingType: true,
           hideOrganizerEmail: true,
           interfaceLanguage: true,
+          requiresConfirmation: true,
+          team: {
+            select: {
+              name: true,
+            },
+          },
         },
       },
       seatsReferences: {

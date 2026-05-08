@@ -3,7 +3,6 @@ import getBookingInfo from "@calcom/features/bookings/lib/getBookingInfo";
 import { loadTranslations } from "@calcom/i18n/server";
 import type { PageProps as _PageProps } from "app/_types";
 import { CustomI18nProvider } from "app/CustomI18nProvider";
-
 import { BookingSuccessCard } from "~/bookings/components/BookingSuccessCard";
 import { BookingSuccessDecoyFallback } from "~/bookings/components/BookingSuccessDecoyFallback";
 
@@ -52,6 +51,7 @@ export default async function BookingSuccessful({ params }: _PageProps) {
 
   const card = (
     <BookingSuccessCard
+      uid={uid}
       title={bookingInfo.title || "Booking"}
       formattedDate={formattedDate}
       formattedTime={formattedTime}

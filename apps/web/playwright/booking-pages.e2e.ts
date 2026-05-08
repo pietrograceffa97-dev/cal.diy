@@ -243,6 +243,42 @@ test.describe("pro user", () => {
     await expect(cancelledHeadline).toBeVisible();
   });
 
+  test("requires-confirmation booking shows the awaiting-confirmation headline on the success page", async ({
+    page,
+  }) => {
+    await bookOptinEvent(page);
+
+    await expect(page.locator("[data-testid=success-page]")).toBeVisible();
+    // The success card branches headline + subtitle on needsConfirmation. For a
+    // requires-confirmation event the booking lands in PENDING and we expect
+    // "Your booking has been submitted" + an awaiting-confirmation subtitle,
+    // never the confirmed "You're booked!" copy. The pro fixture user has no
+    // `name`, so the subtitle resolves to the generic fallback rather than the
+    // user-named variant — both are valid awaiting-confirmation copy.
+    await expect(
+      page.locator("[data-testid=success-page] [data-needs-confirmation=true]")
+    ).toBeVisible();
+    await expect(page.locator("#booking-success-headline")).toHaveText(
+      "Your booking has been submitted"
+    );
+    await expect(page.locator("#booking-success-headline")).not.toHaveText("You're booked!");
+    await expect(page.locator("[data-testid=success-page]")).toContainText(
+      "still needs to be confirmed or rejected"
+    );
+  });
+
+  test("confirmed booking keeps the original 'You're booked!' headline on the success page", async ({
+    page,
+  }) => {
+    await bookFirstEvent(page);
+
+    await expect(page.locator("[data-testid=success-page]")).toBeVisible();
+    await expect(page.locator("#booking-success-headline")).toHaveText("You're booked!");
+    await expect(
+      page.locator("[data-testid=success-page] [data-needs-confirmation=true]")
+    ).toHaveCount(0);
+  });
+
   test("can book an event that requires confirmation and then that booking can be accepted by organizer", async ({
     page,
     users,

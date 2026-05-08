@@ -30,6 +30,11 @@ export interface BookingSuccessCardProps {
   location: string | null;
   startTime: Date | string;
   rawEndTime: Date | string;
+  needsConfirmation?: boolean;
+  // Name shown in the awaiting-confirmation subtitle. Mirrors the legacy view's
+  // `profile.name` (team name for team/collective events, host name otherwise).
+  // Falls back to `hostName` if not provided.
+  confirmationApproverName?: string | null;
 }
 
 export function BookingSuccessCard({
@@ -48,10 +53,25 @@ export function BookingSuccessCard({
   location,
   startTime,
   rawEndTime,
+  needsConfirmation = false,
+  confirmationApproverName,
 }: BookingSuccessCardProps) {
   const { t } = useLocale();
 
   const hostDisplayName = hostName ?? t("host");
+  const approverName = confirmationApproverName ?? hostName;
+
+  const headline = needsConfirmation ? t("booking_submitted") : t("youre_booked");
+  const subtitle = (() => {
+    if (needsConfirmation) {
+      return approverName
+        ? t("user_needs_to_confirm_or_reject_booking", { user: approverName })
+        : t("needs_to_be_confirmed_or_rejected");
+    }
+    return attendeeEmail
+      ? t("calendar_invite_and_confirmation_sent_to", { email: attendeeEmail })
+      : t("emailed_you_and_any_other_attendees");
+  })();
 
   const calendarAttendees = [
     attendeeEmail ? { name: attendeeName, email: attendeeEmail } : null,
@@ -67,18 +87,16 @@ export function BookingSuccessCard({
           role="dialog"
           aria-modal="true"
           aria-labelledby="booking-success-headline">
-          <header className="px-6 pb-6 pt-8 text-center sm:px-10 sm:pt-10">
+          <header
+            className="px-6 pb-6 pt-8 text-center sm:px-10 sm:pt-10"
+            data-needs-confirmation={needsConfirmation || undefined}>
             <div className="bg-cal-success mx-auto flex h-12 w-12 items-center justify-center rounded-full">
               <CheckIcon className="h-5 w-5 text-green-600 dark:text-green-400" />
             </div>
             <h1 id="booking-success-headline" className="text-emphasis mt-6 text-2xl font-semibold leading-7">
-              {t("youre_booked")}
+              {headline}
             </h1>
-            <p className="text-default mt-3 text-sm leading-5">
-              {attendeeEmail
-                ? t("calendar_invite_and_confirmation_sent_to", { email: attendeeEmail })
-                : t("emailed_you_and_any_other_attendees")}
-            </p>
+            <p className="text-default mt-3 text-sm leading-5">{subtitle}</p>
           </header>
 
           <section

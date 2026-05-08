@@ -1,6 +1,7 @@
 import dayjs from "@calcom/dayjs";
 import getBookingInfo from "@calcom/features/bookings/lib/getBookingInfo";
 import { loadTranslations } from "@calcom/i18n/server";
+import { BookingStatus } from "@calcom/prisma/enums";
 import type { PageProps as _PageProps } from "app/_types";
 import { CustomI18nProvider } from "app/CustomI18nProvider";
 import { BookingSuccessCard } from "~/bookings/components/BookingSuccessCard";
@@ -49,6 +50,15 @@ export default async function BookingSuccessful({ params }: _PageProps) {
   const startTimeIso = startTime ? startTime.toISOString() : new Date().toISOString();
   const endTimeIso = endTime ? endTime.toISOString() : startTimeIso;
 
+  const needsConfirmation =
+    bookingInfo.status === BookingStatus.PENDING && Boolean(bookingInfo.eventType?.requiresConfirmation);
+
+  // Mirror the legacy success view's `profile.name` source: prefer the team
+  // name for team/collective events and fall back to the assigned host so the
+  // awaiting-confirmation subtitle reads naturally on round-robin bookings
+  // that haven't picked a host yet.
+  const confirmationApproverName = bookingInfo.eventType?.team?.name ?? bookingInfo.user?.name ?? null;
+
   const card = (
     <BookingSuccessCard
       uid={uid}
@@ -66,6 +76,8 @@ export default async function BookingSuccessful({ params }: _PageProps) {
       location={bookingInfo.location || null}
       startTime={startTimeIso}
       rawEndTime={endTimeIso}
+      needsConfirmation={needsConfirmation}
+      confirmationApproverName={confirmationApproverName}
     />
   );
 

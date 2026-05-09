@@ -81,7 +81,9 @@ function VideoVariant({ url, t }: { url: string; t: ReturnType<typeof useLocale>
         data-testid="booking-success-location-join">
         {t("join_meeting")}
       </a>
-      <span className="text-subtle">·</span>
+      <span className="text-subtle" aria-hidden="true">
+        ·
+      </span>
       <a
         href={url}
         target="_blank"

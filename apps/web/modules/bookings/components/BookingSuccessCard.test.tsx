@@ -25,6 +25,7 @@ vi.mock("@calcom/ui/components/badge", () => ({
 
 vi.mock("@coss/ui/icons", () => ({
   CheckIcon: (props: Record<string, unknown>) => <svg data-testid="check-icon" {...props} />,
+  XIcon: (props: Record<string, unknown>) => <svg data-testid="x-icon" {...props} />,
   CopyIcon: (props: Record<string, unknown>) => <svg {...props} />,
 }));
 
@@ -204,5 +205,67 @@ describe("BookingSuccessCard headline / subtitle (PENDING vs ACCEPTED)", () => {
 
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("youre_booked");
     expect(screen.getByText("emailed_you_and_any_other_attendees")).toBeInTheDocument();
+  });
+
+  it("renders a cancelled-state headline with the e2e testid when isCancelled is true", () => {
+    render(
+      <BookingSuccessCard
+        {...baseProps}
+        isCancelled={true}
+        cancellationReason="No longer needed"
+        cancelledBy="alex@example.com"
+      />
+    );
+
+    const headline = screen.getByRole("heading", { level: 1 });
+    expect(headline).toHaveTextContent("event_cancelled");
+    expect(headline).toHaveAttribute("data-testid", "cancelled-headline");
+    expect(headline).not.toHaveTextContent("youre_booked");
+    expect(headline).not.toHaveTextContent("booking_submitted");
+  });
+
+  it("surfaces cancellationReason and cancelledBy when the booking is cancelled", () => {
+    render(
+      <BookingSuccessCard
+        {...baseProps}
+        isCancelled={true}
+        cancellationReason="No longer needed"
+        cancelledBy="organizer@example.com"
+      />
+    );
+
+    expect(screen.getByText("reason")).toBeInTheDocument();
+    expect(screen.getByText("No longer needed")).toBeInTheDocument();
+    expect(screen.getByText("cancelled_by")).toBeInTheDocument();
+    expect(screen.getByText("organizer@example.com")).toBeInTheDocument();
+  });
+
+  it("hides the reschedule, cancel, and add-to-calendar actions on a cancelled booking", () => {
+    render(<BookingSuccessCard {...baseProps} isCancelled={true} />);
+
+    expect(screen.queryByTestId("booking-success-actions")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("actions")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("add-to-calendar")).not.toBeInTheDocument();
+  });
+
+  it("suppresses the confirmation subtitle when isCancelled is true", () => {
+    render(<BookingSuccessCard {...baseProps} isCancelled={true} />);
+
+    expect(screen.queryByText(/calendar_invite_and_confirmation_sent_to/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/emailed_you_and_any_other_attendees/)).not.toBeInTheDocument();
+  });
+
+  it("does not render the reason / cancelled_by rows when those fields are missing", () => {
+    render(
+      <BookingSuccessCard
+        {...baseProps}
+        isCancelled={true}
+        cancellationReason={null}
+        cancelledBy={null}
+      />
+    );
+
+    expect(screen.queryByText("reason")).not.toBeInTheDocument();
+    expect(screen.queryByText("cancelled_by")).not.toBeInTheDocument();
   });
 });

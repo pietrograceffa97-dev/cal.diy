@@ -1,3 +1,4 @@
+import { withSentryConfig } from "@sentry/nextjs";
 import { withBotId } from "botid/next/config";
 import { config as dotenvConfig } from "dotenv";
 import type { NextConfig } from "next";
@@ -674,4 +675,24 @@ const nextConfig = (phase: string): NextConfig => {
   };
 };
 
-export default (phase: string): NextConfig => plugins.reduce((acc, plugin) => plugin(acc), nextConfig(phase));
+// Sentry source-map upload + automatic Vercel cron monitoring.
+// Wraps the fully-composed (plugins-applied) config so Sentry's
+// webpack plugin sees the final shape.
+const sentryWebpackPluginOptions = {
+  org: "pietro-qx",
+  project: "cal-diy",
+  silent: !process.env.CI,
+  widenClientFileUpload: true,
+  webpack: {
+    automaticVercelMonitors: true,
+    treeshake: {
+      removeDebugLogging: true,
+    },
+  },
+};
+
+export default (phase: string): NextConfig =>
+  withSentryConfig(
+    plugins.reduce((acc, plugin) => plugin(acc), nextConfig(phase)),
+    sentryWebpackPluginOptions,
+  );

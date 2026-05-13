@@ -38,6 +38,13 @@ if (process.env.NODE_ENV === "production") {
       event.tags = {
         ...event.tags,
         errorSource: "client",
+        // Tag with the PM Hub project that owns this deploy so the
+        // PM Hub webhook can route the resulting issue to the right
+        // Step 8 monitoring window. `NEXT_PUBLIC_PMHUB_PROJECT_ID`
+        // is set as a Vercel env var per deploy.
+        ...(process.env.NEXT_PUBLIC_PMHUB_PROJECT_ID
+          ? { pmhub_project: process.env.NEXT_PUBLIC_PMHUB_PROJECT_ID }
+          : {}),
       };
       return event;
     },

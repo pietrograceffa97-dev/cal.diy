@@ -138,9 +138,30 @@ export async function GET(req: Request): Promise<NextResponse | Response | never
   // 6. Set the session cookie. Name + options must match
   // packages/lib/default-cookies.ts (cal.diy already sets
   // SameSite=None; Secure on HTTPS — iframe-friendly by design).
+  //
+  // HTTPS detection: prefer the request URL's scheme, fall back to
+  // x-forwarded-proto (Vercel sets this on proxied requests), then to
+  // NEXT_PUBLIC_WEBAPP_URL. The original code read `WEBAPP_URL` (no
+  // NEXT_PUBLIC_ prefix), which isn't set in this scope at runtime —
+  // meaning isHttps was always false, the cookie was named
+  // `next-auth.session-token` (without `__Secure-` prefix) and
+  // sameSite=lax — both wrong for the iframe / production case.
+  // Production cal.diy reads `__Secure-next-auth.session-token` per
+  // packages/lib/default-cookies.ts, so the older code's cookie was
+  // never seen by downstream routes, and `/event-types` redirected
+  // to /auth/login (X-Frame-Options: DENY) inside the iframe.
+  const requestUrl = new URL(req.url);
+  const forwardedProto = req.headers.get("x-forwarded-proto");
+  const webappUrl =
+    process.env.NEXT_PUBLIC_WEBAPP_URL ?? process.env.WEBAPP_URL ?? "";
+  const isHttps =
+    requestUrl.protocol === "https:" ||
+    forwardedProto === "https" ||
+    webappUrl.startsWith("https://");
   const cookieStore = await cookies();
-  const isHttps = (process.env.WEBAPP_URL ?? "").startsWith("https://");
-  const cookieName = isHttps ? "__Secure-next-auth.session-token" : "next-auth.session-token";
+  const cookieName = isHttps
+    ? "__Secure-next-auth.session-token"
+    : "next-auth.session-token";
   cookieStore.set(cookieName, token, {
     httpOnly: true,
     secure: isHttps,

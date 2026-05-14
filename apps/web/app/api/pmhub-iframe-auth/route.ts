@@ -108,10 +108,13 @@ export async function GET(req: Request): Promise<NextResponse | Response | never
   // The session callback at packages/features/auth/lib/next-auth-options.ts
   // reads token.id, .email, .name, .username, .locale, .role, plus a few
   // optional fields (profileId, upId, org, belongsToActiveTeam,
-  // orgAwareUsername, impersonatedBy, inactiveAdminReason). Optional
-  // fields default to null/undefined and don't crash the session.
-  // Downstream code that needs them (org-scoped routes, etc.) may need
-  // additional fields added here as we discover them.
+  // orgAwareUsername, impersonatedBy, inactiveAdminReason). The augmented
+  // JWT interface in packages/types/next-auth.d.ts marks each optional
+  // field as `?` (accepts undefined but not null), and the session
+  // callback uses `token.x ?? null` patterns when reading them — so
+  // omitting them entirely is safe. Downstream code that needs them
+  // (org-scoped routes etc.) may need additional fields added here as
+  // we discover them.
   const tokenPayload = {
     sub: String(user.id), // NextAuth standard
     id: user.id,
@@ -120,14 +123,8 @@ export async function GET(req: Request): Promise<NextResponse | Response | never
     username: user.username,
     locale: user.locale ?? "en",
     role: user.role,
-    // Optional fields — left null so downstream nullable readers don't crash:
-    profileId: null,
-    upId: null,
     orgAwareUsername: user.username,
     belongsToActiveTeam: false,
-    org: null,
-    impersonatedBy: null,
-    inactiveAdminReason: null,
   };
 
   const sessionMaxAge = 60 * 60; // 1h — short, since this is iframe-only

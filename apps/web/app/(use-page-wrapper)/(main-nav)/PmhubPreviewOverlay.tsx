@@ -44,8 +44,11 @@ export function PmhubPreviewOverlay({
   pmhubBaseUrl: string;
   children: React.ReactNode;
 }) {
+  // useSearchParams returns ReadonlyURLSearchParams | null in
+  // Next 15+. Null during initial hydration of static-prerendered
+  // segments — fall through to "no preview" until it resolves.
   const params = useSearchParams();
-  const projectId = params.get("pmhub_project_id");
+  const projectId = params?.get("pmhub_project_id") ?? null;
   const [exited, setExited] = useState(false);
 
   if (!projectId) return <>{children}</>;

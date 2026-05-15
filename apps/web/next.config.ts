@@ -224,6 +224,14 @@ const nextConfig = (phase: string): NextConfig => {
 
   return {
     output: process.env.BUILD_STANDALONE === "true" ? "standalone" : undefined,
+    // Optional sub-path mount. When NEXT_PUBLIC_BASE_PATH is set
+    // (e.g. "/cal-diy-iframe"), cal.diy serves all routes under that
+    // prefix and Next auto-prefixes internal links, redirects, and
+    // asset URLs. Used by PM Agentic Hub to embed cal.diy behind a
+    // same-origin reverse proxy without cross-origin / X-Frame-Options
+    // / Private Network Access policy collisions. Unset on standard
+    // cal.diy deployments — `undefined` is the no-op default.
+    basePath: process.env.NEXT_PUBLIC_BASE_PATH || undefined,
     serverExternalPackages: [
       "deasync",
       "http-cookie-agent",

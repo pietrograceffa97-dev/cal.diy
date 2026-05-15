@@ -44,7 +44,7 @@ export default async function PmHubPreviewPage({
 
   const pmhubUrl =
     process.env.PMHUB_PUBLIC_URL ??
-    "https://pm-hub-production.up.railway.app";
+    "https://pm-agentic-hub-production.up.railway.app";
 
   const prototypeSrc = `${pmhubUrl.replace(/\/+$/, "")}/prototype/${encodeURIComponent(
     projectId,

@@ -62,7 +62,7 @@ export function PmhubPreviewOverlay({
 
   return (
     <div className="flex h-full w-full flex-col">
-      <div className="bg-amber-50 border-b-subtle text-default flex items-center justify-between gap-2 border-b px-4 py-1.5 text-xs">
+      <div className="bg-semantic-attention-subtle border-subtle text-default flex items-center justify-between gap-2 border-b px-4 py-1.5 text-xs">
         <span>
           <span className="font-semibold">Previewing PM Hub prototype</span>{" "}
           <code className="bg-emphasis text-emphasis ml-1 rounded px-1.5 py-0.5 font-mono text-[10px]">

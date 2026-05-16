@@ -224,6 +224,18 @@ const nextConfig = (phase: string): NextConfig => {
 
   return {
     output: process.env.BUILD_STANDALONE === "true" ? "standalone" : undefined,
+    // PM Hub R7.7 hot-rebuild loop concern: keep `.next/` contents
+    // across `next build` runs so a concurrent `next start` (running
+    // under PM Hub's build runner) keeps reading the prior build's
+    // chunks while the new build is in flight. Without this, the
+    // first thing `next build` does is wipe `.next/` — the running
+    // `next start` then 404s on its already-loaded chunk hashes
+    // (route splits, RSC payloads, font subsets) and any in-flight
+    // iframe request lands on a 502. See
+    // pm-agentic-hub/.planning/phases/R7.7-design-agent-hot-iteration-loop-watcher-rebuild-restart/R7.7-RESEARCH.md
+    // Pitfall 1. Toggle back to default `true` only if PM Hub's
+    // runner moves to build-to-staging-dir + atomic-rename instead.
+    cleanDistDir: false,
     // PM Hub deploy-time concern: cal.diy main currently has TS errors
     // (Next 16 / Turbopack tRPC inference quirk in SettingsLayoutAppDirClient,
     // and likely other spots). Type-check is a CI gate, not a deploy gate

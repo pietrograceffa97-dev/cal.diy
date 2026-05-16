@@ -168,24 +168,30 @@ export async function GET(req: Request): Promise<NextResponse | Response | never
 
   // 7. Redirect inside the iframe to the target route.
   //
-  // We use NextResponse.redirect (not `redirect()` from
-  // next/navigation) so we have explicit Location-header control with
-  // no basePath manipulation. The `route` param is the BARE cal.diy
-  // route (no basePath prefix); we prefix it explicitly here. PM Hub
-  // strips any prefix on its side before signing, so the HMAC payload
-  // and the redirect-target derivation are both deterministic.
+  // We emit the Location header directly via a raw Response (not
+  // `redirect()` from next/navigation, not `NextResponse.redirect()`):
+  //   - next/navigation `redirect()` has surprising basePath behavior
+  //     in route handlers under Next 16 prod (empirically:
+  //     redirect("/foo") → Location: /foo; redirect("/basePath/foo")
+  //     → Location: /basePath/basePath/foo).
+  //   - NextResponse.redirect() requires an absolute URL — `new URL(path,
+  //     req.url)` resolves against the INTERNAL origin (e.g.
+  //     http://0.0.0.0:3010/...) because cal.diy sits behind a rewrite
+  //     proxy and req.url reflects the upstream connection, not the
+  //     public browser-visible origin. The browser would then try to
+  //     navigate to that internal address and fail.
   //
-  // History: `redirect("/cal-diy-iframe/event-types")` from
-  // next/navigation produced Location `/cal-diy-iframe/cal-diy-iframe/event-types`
-  // (double prefix) under Next 16 prod mode; `redirect("/event-types")`
-  // produced bare Location `/event-types` (no prefix). Neither
-  // produced the single-prefix target we need. Using NextResponse
-  // bypasses both behaviors.
+  // A relative Location header on a plain Response sidesteps both:
+  // browsers resolve relative URLs against the origin of the document
+  // that received the response — i.e. the public PM Hub URL the iframe
+  // is actually loading from.
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
   const bareRoute = route.startsWith("/") ? route : `/${route}`;
   const fullPath = `${basePath}${bareRoute}`;
-  const reqOrigin = new URL(req.url).origin;
-  return NextResponse.redirect(new URL(fullPath, reqOrigin), 307);
+  return new Response(null, {
+    status: 307,
+    headers: { Location: fullPath },
+  });
 }
 
 function jsonError(status: number, message: string): NextResponse {

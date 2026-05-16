@@ -50,6 +50,7 @@ import { InfiniteSkeletonLoader } from "@calcom/web/modules/event-types/componen
 import { SearchIcon } from "@coss/ui/icons";
 import { useAutoAnimate } from "@formkit/auto-animate/react";
 import { TRPCClientError } from "@trpc/client";
+import { X } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type React from "react";
@@ -69,6 +70,84 @@ type EventTypeGroup = EventTypeGroups[number];
 type EventType = EventTypeGroup["eventTypes"][number];
 
 const LIMIT = 10;
+
+// --- Duration filter ---------------------------------------------------------
+
+const DURATION_OPTIONS: { value: number; label: string }[] = [
+  { value: 15, label: "15m" },
+  { value: 30, label: "30m" },
+  { value: 45, label: "45m" },
+  { value: 60, label: "60m" },
+];
+
+interface DurationFilterContextType {
+  activeDuration: number | null;
+  setActiveDuration: (value: number | null) => void;
+}
+
+const DurationFilterContextInternal: React.Context<DurationFilterContextType | undefined> = createContext<
+  DurationFilterContextType | undefined
+>(undefined);
+
+const useDurationFilterContext = (): DurationFilterContextType => {
+  const context = useContext(DurationFilterContextInternal);
+  if (!context) {
+    // Filter is optional; fail soft so old callers don't crash.
+    return { activeDuration: null, setActiveDuration: () => undefined };
+  }
+  return context;
+};
+
+const DurationFilterChips: FC = () => {
+  const { t } = useLocale();
+  const { activeDuration, setActiveDuration } = useDurationFilterContext();
+
+  return (
+    <div
+      className="border-subtle bg-default mb-3 flex items-center gap-2 overflow-x-auto rounded-md border px-3 py-2"
+      role="group"
+      aria-label={t("filter_by_duration")}
+      data-testid="duration-filter">
+      <span className="text-subtle shrink-0 text-xs font-medium uppercase tracking-wide">
+        {t("duration")}
+      </span>
+      <div className="flex shrink-0 flex-nowrap items-center gap-1.5">
+        {DURATION_OPTIONS.map((opt) => {
+          const isActive = activeDuration === opt.value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              aria-pressed={isActive}
+              data-testid={`duration-chip-${opt.value}`}
+              data-active={isActive || undefined}
+              onClick={() => setActiveDuration(isActive ? null : opt.value)}
+              className={classNames(
+                "h-7 shrink-0 rounded-md border px-3 text-sm transition",
+                isActive
+                  ? "border-emphasis bg-emphasis text-emphasis font-medium"
+                  : "border-subtle bg-default text-default hover:bg-cal-muted"
+              )}>
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+      {activeDuration !== null && (
+        <button
+          type="button"
+          onClick={() => setActiveDuration(null)}
+          data-testid="duration-filter-clear"
+          className="text-subtle hover:text-emphasis ml-auto flex shrink-0 items-center gap-1 text-xs">
+          <X className="size-3.5" aria-hidden />
+          {t("clear")}
+        </button>
+      )}
+    </div>
+  );
+};
+
+// ----------------------------------------------------------------------------
 
 interface SearchContextType {
   searchTerm: string;
@@ -114,17 +193,21 @@ const querySchema = z.object({
 const InfiniteTeamsTab: FC<InfiniteTeamsTabProps> = (props: InfiniteTeamsTabProps) => {
   const { activeEventTypeGroup } = props;
   const { debouncedSearchTerm } = useSearchContext();
+  const { activeDuration } = useDurationFilterContext();
   const { t } = useLocale();
 
   const query = trpc.viewer.eventTypes.getEventTypesFromGroup.useInfiniteQuery(
     {
       limit: LIMIT,
       searchQuery: debouncedSearchTerm,
+      // TODO(server): extend getEventTypesFromGroup input schema with `durationFilter: number | null`
+      // and apply a `where: { length: durationFilter }` clause when present.
+      durationFilter: activeDuration ?? undefined,
       group: {
         teamId: activeEventTypeGroup?.teamId,
         parentId: activeEventTypeGroup?.parentId,
       },
-    },
+    } as Parameters<typeof trpc.viewer.eventTypes.getEventTypesFromGroup.useInfiniteQuery>[0],
     {
       refetchOnWindowFocus: true,
       refetchOnMount: true,
@@ -986,7 +1069,12 @@ const InfiniteScrollMain = ({
   return (
     <>
       {eventTypeGroups.length > 1 && <HorizontalTabs tabs={tabs} />}
-      {eventTypeGroups.length >= 1 && <InfiniteTeamsTab activeEventTypeGroup={activeEventTypeGroup[0]} />}
+      {eventTypeGroups.length >= 1 && (
+        <>
+          <DurationFilterChips />
+          <InfiniteTeamsTab activeEventTypeGroup={activeEventTypeGroup[0]} />
+        </>
+      )}
       {eventTypeGroups.length === 0 && <CreateFirstEventTypeView slug={profiles[0].slug ?? ""} />}
       <EventTypeEmbedDialog />
       {searchParams?.get("dialog") === "duplicate" && <DuplicateDialog />}
@@ -1048,6 +1136,7 @@ export const EventTypesCTA = ({ userEventGroupsData }: Omit<Props, "user">) => {
 
 const EventTypesPage = ({ userEventGroupsData, user }: Props) => {
   const router = useRouter();
+  const [activeDuration, setActiveDuration] = useState<number | null>(null);
 
   useEffect(() => {
     /**
@@ -1062,10 +1151,12 @@ const EventTypesPage = ({ userEventGroupsData, user }: Props) => {
   }, [router]);
 
   return (
-    <InfiniteScrollMain
-      profiles={userEventGroupsData.profiles}
-      eventTypeGroups={userEventGroupsData.eventTypeGroups}
-    />
+    <DurationFilterContextInternal.Provider value={{ activeDuration, setActiveDuration }}>
+      <InfiniteScrollMain
+        profiles={userEventGroupsData.profiles}
+        eventTypeGroups={userEventGroupsData.eventTypeGroups}
+      />
+    </DurationFilterContextInternal.Provider>
   );
 };
 

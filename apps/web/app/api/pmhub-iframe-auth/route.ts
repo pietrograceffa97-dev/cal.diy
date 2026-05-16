@@ -135,37 +135,34 @@ export async function GET(req: Request): Promise<NextResponse | Response | never
     maxAge: sessionMaxAge,
   });
 
-  // 6. Set the session cookie. Name + options must match
-  // packages/lib/default-cookies.ts (cal.diy already sets
-  // SameSite=None; Secure on HTTPS — iframe-friendly by design).
+  // 6. Set the session cookie. Cookie name + options MUST match what
+  // cal.diy's NextAuth config will read on subsequent requests —
+  // otherwise the page redirects to /auth/login (X-Frame-Options: DENY)
+  // inside the iframe.
   //
-  // HTTPS detection: prefer the request URL's scheme, fall back to
-  // x-forwarded-proto (Vercel sets this on proxied requests), then to
-  // NEXT_PUBLIC_WEBAPP_URL. The original code read `WEBAPP_URL` (no
-  // NEXT_PUBLIC_ prefix), which isn't set in this scope at runtime —
-  // meaning isHttps was always false, the cookie was named
-  // `next-auth.session-token` (without `__Secure-` prefix) and
-  // sameSite=lax — both wrong for the iframe / production case.
-  // Production cal.diy reads `__Secure-next-auth.session-token` per
-  // packages/lib/default-cookies.ts, so the older code's cookie was
-  // never seen by downstream routes, and `/event-types` redirected
-  // to /auth/login (X-Frame-Options: DENY) inside the iframe.
-  const requestUrl = new URL(req.url);
-  const forwardedProto = req.headers.get("x-forwarded-proto");
-  const webappUrl =
-    process.env.NEXT_PUBLIC_WEBAPP_URL ?? process.env.WEBAPP_URL ?? "";
-  const isHttps =
-    requestUrl.protocol === "https:" ||
-    forwardedProto === "https" ||
-    webappUrl.startsWith("https://");
+  // Cal.diy derives the cookie name from `WEBAPP_URL.startsWith("https://")`
+  // in packages/features/auth/lib/next-auth-options.ts:408 via
+  // defaultCookies(useSecureCookies). `WEBAPP_URL` there resolves to
+  // `process.env.NEXT_PUBLIC_WEBAPP_URL` (packages/lib/constants.ts:23).
+  // We mirror the EXACT same input here so the names always agree.
+  //
+  // Previous bug: this route derived `isHttps` from the request URL's
+  // x-forwarded-proto header (= true on Railway). That set
+  // `__Secure-next-auth.session-token`. But in the PM Hub container,
+  // start.sh overrides NEXT_PUBLIC_WEBAPP_URL to
+  // `http://localhost:3010/cal-diy-iframe` so cal.diy's own self-fetches
+  // (/api/logo etc.) bypass PM Hub's Basic Auth gate. That makes
+  // cal.diy's `useSecureCookies = false`, so its NextAuth reads
+  // `next-auth.session-token`. Mismatch → session invisible → bounce.
+  const useSecureCookies = (process.env.NEXT_PUBLIC_WEBAPP_URL ?? "").startsWith(
+    "https://",
+  );
   const cookieStore = await cookies();
-  const cookieName = isHttps
-    ? "__Secure-next-auth.session-token"
-    : "next-auth.session-token";
+  const cookieName = `${useSecureCookies ? "__Secure-" : ""}next-auth.session-token`;
   cookieStore.set(cookieName, token, {
     httpOnly: true,
-    secure: isHttps,
-    sameSite: isHttps ? "none" : "lax",
+    secure: useSecureCookies,
+    sameSite: useSecureCookies ? "none" : "lax",
     path: "/",
     maxAge: sessionMaxAge,
   });

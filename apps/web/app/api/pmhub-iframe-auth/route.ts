@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 import { encode } from "next-auth/jwt";
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
 import { NextResponse } from "next/server";
 
 import prisma from "@calcom/prisma";
@@ -168,7 +167,25 @@ export async function GET(req: Request): Promise<NextResponse | Response | never
   });
 
   // 7. Redirect inside the iframe to the target route.
-  redirect(route);
+  //
+  // We use NextResponse.redirect (not `redirect()` from
+  // next/navigation) so we have explicit Location-header control with
+  // no basePath manipulation. The `route` param is the BARE cal.diy
+  // route (no basePath prefix); we prefix it explicitly here. PM Hub
+  // strips any prefix on its side before signing, so the HMAC payload
+  // and the redirect-target derivation are both deterministic.
+  //
+  // History: `redirect("/cal-diy-iframe/event-types")` from
+  // next/navigation produced Location `/cal-diy-iframe/cal-diy-iframe/event-types`
+  // (double prefix) under Next 16 prod mode; `redirect("/event-types")`
+  // produced bare Location `/event-types` (no prefix). Neither
+  // produced the single-prefix target we need. Using NextResponse
+  // bypasses both behaviors.
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+  const bareRoute = route.startsWith("/") ? route : `/${route}`;
+  const fullPath = `${basePath}${bareRoute}`;
+  const reqOrigin = new URL(req.url).origin;
+  return NextResponse.redirect(new URL(fullPath, reqOrigin), 307);
 }
 
 function jsonError(status: number, message: string): NextResponse {

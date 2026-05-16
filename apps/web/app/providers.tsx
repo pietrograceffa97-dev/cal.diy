@@ -23,7 +23,7 @@ export function Providers({ isEmbed, children, country }: ProvidersProps) {
 
   return (
     <GeoProvider country={country}>
-      <SessionProvider>
+      <SessionProvider basePath={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/auth`}>
         <TrpcProvider>
           <ToastProvider position="bottom-center">
             {!isEmbed && !isBookingPage && <NotificationSoundHandler />}

@@ -150,22 +150,25 @@ export async function GET(req: Request): Promise<NextResponse | Response | never
   // packages/lib/default-cookies.ts, so the older code's cookie was
   // never seen by downstream routes, and `/event-types` redirected
   // to /auth/login (X-Frame-Options: DENY) inside the iframe.
-  const requestUrl = new URL(req.url);
-  const forwardedProto = req.headers.get("x-forwarded-proto");
-  const webappUrl =
-    process.env.NEXT_PUBLIC_WEBAPP_URL ?? process.env.WEBAPP_URL ?? "";
-  const isHttps =
-    requestUrl.protocol === "https:" ||
-    forwardedProto === "https" ||
-    webappUrl.startsWith("https://");
+  // Cookie name MUST agree with what cal.diy's NextAuth READS in
+  // packages/features/auth/lib/next-auth-options.ts:408 via
+  // defaultCookies(useSecureCookies). Cal.diy's useSecureCookies is derived
+  // from NEXT_PUBLIC_WEBAPP_URL.startsWith("https://") — which start.sh on
+  // Railway overrides to http://localhost:3010/cal-diy-iframe (so cal.diy's
+  // own self-fetches bypass PM Hub Basic Auth). The setter MUST mirror that
+  // exact signal, NOT the request URL's scheme — otherwise on Railway the
+  // x-forwarded-proto header makes isHttps=true and we set __Secure-…, but
+  // cal.diy reads next-auth.session-token (no prefix). Mismatch → cookie
+  // invisible → user appears logged out.
+  const useSecureCookies = (process.env.NEXT_PUBLIC_WEBAPP_URL ?? "").startsWith(
+    "https://",
+  );
   const cookieStore = await cookies();
-  const cookieName = isHttps
-    ? "__Secure-next-auth.session-token"
-    : "next-auth.session-token";
+  const cookieName = `${useSecureCookies ? "__Secure-" : ""}next-auth.session-token`;
   cookieStore.set(cookieName, token, {
     httpOnly: true,
-    secure: isHttps,
-    sameSite: isHttps ? "none" : "lax",
+    secure: useSecureCookies,
+    sameSite: useSecureCookies ? "none" : "lax",
     path: "/",
     maxAge: sessionMaxAge,
   });

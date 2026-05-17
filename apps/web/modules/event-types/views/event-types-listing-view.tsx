@@ -640,7 +640,7 @@ export const InfiniteEventTypeList = ({
               type.schedulingType !== SchedulingType.MANAGED;
             return (
               <li key={type.id}>
-                <div className="flex w-full items-center justify-between transition hover:bg-cal-muted">
+                <div className="flex w-full items-center justify-between transition hover:bg-emerald-500/10">
                   <div className="group flex w-full max-w-full items-center justify-between overflow-hidden px-4 py-4 sm:px-6">
                     {!(firstItem && firstItem.id === type.id) && (
                       <ArrowButton

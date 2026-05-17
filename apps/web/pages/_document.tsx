@@ -65,11 +65,34 @@ class MyDocument extends Document<Props> {
             `,
             }}
           />
-          <link rel="apple-touch-icon" sizes="180x180" href="/api/logo?type=apple-touch-icon" />
-          <link rel="icon" type="image/png" sizes="32x32" href="/api/logo?type=favicon-32" />
-          <link rel="icon" type="image/png" sizes="16x16" href="/api/logo?type=favicon-16" />
-          <link rel="manifest" href="/site.webmanifest" />
-          <link rel="mask-icon" href="/safari-pinned-tab.svg" color="#000000" />
+          {/* basePath prefix for icons + manifest (see app/layout.tsx).
+              Raw <link> tags in Pages Router are NOT auto-prefixed by
+              Next.js's basePath — we have to prepend manually so the
+              browser resolves against cal.diy's origin under basePath
+              instead of the parent (PM Hub) root origin which 401s. */}
+          <link
+            rel="apple-touch-icon"
+            sizes="180x180"
+            href={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/logo?type=apple-touch-icon`}
+          />
+          <link
+            rel="icon"
+            type="image/png"
+            sizes="32x32"
+            href={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/logo?type=favicon-32`}
+          />
+          <link
+            rel="icon"
+            type="image/png"
+            sizes="16x16"
+            href={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/api/logo?type=favicon-16`}
+          />
+          <link rel="manifest" href={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/site.webmanifest`} />
+          <link
+            rel="mask-icon"
+            href={`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/safari-pinned-tab.svg`}
+            color="#000000"
+          />
           <meta name="msapplication-TileColor" content="#ff0000" />
           <meta name="theme-color" media="(prefers-color-scheme: light)" content="#F9FAFC" />
           <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1F1F1F" />

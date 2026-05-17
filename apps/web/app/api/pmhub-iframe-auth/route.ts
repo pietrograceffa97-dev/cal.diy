@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 import { encode } from "next-auth/jwt";
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
 import { NextResponse } from "next/server";
 
 import prisma from "@calcom/prisma";
@@ -135,31 +134,25 @@ export async function GET(req: Request): Promise<NextResponse | Response | never
     maxAge: sessionMaxAge,
   });
 
-  // 6. Set the session cookie. Name + options must match
-  // packages/lib/default-cookies.ts (cal.diy already sets
-  // SameSite=None; Secure on HTTPS — iframe-friendly by design).
+  // 6. Set the session cookie. Cookie name + options MUST match what
+  // cal.diy's NextAuth config will read on subsequent requests —
+  // otherwise the page redirects to /auth/login (X-Frame-Options: DENY)
+  // inside the iframe.
   //
-  // HTTPS detection: prefer the request URL's scheme, fall back to
-  // x-forwarded-proto (Vercel sets this on proxied requests), then to
-  // NEXT_PUBLIC_WEBAPP_URL. The original code read `WEBAPP_URL` (no
-  // NEXT_PUBLIC_ prefix), which isn't set in this scope at runtime —
-  // meaning isHttps was always false, the cookie was named
-  // `next-auth.session-token` (without `__Secure-` prefix) and
-  // sameSite=lax — both wrong for the iframe / production case.
-  // Production cal.diy reads `__Secure-next-auth.session-token` per
-  // packages/lib/default-cookies.ts, so the older code's cookie was
-  // never seen by downstream routes, and `/event-types` redirected
-  // to /auth/login (X-Frame-Options: DENY) inside the iframe.
-  // Cookie name MUST agree with what cal.diy's NextAuth READS in
-  // packages/features/auth/lib/next-auth-options.ts:408 via
-  // defaultCookies(useSecureCookies). Cal.diy's useSecureCookies is derived
-  // from NEXT_PUBLIC_WEBAPP_URL.startsWith("https://") — which start.sh on
-  // Railway overrides to http://localhost:3010/cal-diy-iframe (so cal.diy's
-  // own self-fetches bypass PM Hub Basic Auth). The setter MUST mirror that
-  // exact signal, NOT the request URL's scheme — otherwise on Railway the
-  // x-forwarded-proto header makes isHttps=true and we set __Secure-…, but
-  // cal.diy reads next-auth.session-token (no prefix). Mismatch → cookie
-  // invisible → user appears logged out.
+  // Cal.diy derives the cookie name from `WEBAPP_URL.startsWith("https://")`
+  // in packages/features/auth/lib/next-auth-options.ts:408 via
+  // defaultCookies(useSecureCookies). `WEBAPP_URL` there resolves to
+  // `process.env.NEXT_PUBLIC_WEBAPP_URL` (packages/lib/constants.ts:23).
+  // We mirror the EXACT same input here so the names always agree.
+  //
+  // Previous bug: this route derived `isHttps` from the request URL's
+  // x-forwarded-proto header (= true on Railway). That set
+  // `__Secure-next-auth.session-token`. But in the PM Hub container,
+  // start.sh overrides NEXT_PUBLIC_WEBAPP_URL to
+  // `http://localhost:3010/cal-diy-iframe` so cal.diy's own self-fetches
+  // (/api/logo etc.) bypass PM Hub's Basic Auth gate. That makes
+  // cal.diy's `useSecureCookies = false`, so its NextAuth reads
+  // `next-auth.session-token`. Mismatch → session invisible → bounce.
   const useSecureCookies = (process.env.NEXT_PUBLIC_WEBAPP_URL ?? "").startsWith(
     "https://",
   );
@@ -175,18 +168,25 @@ export async function GET(req: Request): Promise<NextResponse | Response | never
 
   // 7. Redirect inside the iframe to the target route.
   //
-  // Ported from cal.diy main (commit chain post-R7.7). The simpler
-  // redirect(route) regressed: in Next 16 production with basePath set,
-  // next/navigation redirect() does NOT prepend the basePath when called
-  // from a route handler, so Location went out as /event-types and the
-  // browser loaded PM Hub's 404 (chrome included) into the iframe
-  // instead of cal.diy. Neither NextResponse.redirect (which resolves
-  // against the internal 0.0.0.0:3010 origin) nor next/navigation
-  // redirect work — main settled on a raw Response with a relative
-  // Location header that the browser resolves against the document
-  // origin (the public PM Hub URL).
-  const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
-  const bareRoute = route.startsWith('/') ? route : `/${route}`;
+  // We emit the Location header directly via a raw Response (not
+  // `redirect()` from next/navigation, not `NextResponse.redirect()`):
+  //   - next/navigation `redirect()` has surprising basePath behavior
+  //     in route handlers under Next 16 prod (empirically:
+  //     redirect("/foo") → Location: /foo; redirect("/basePath/foo")
+  //     → Location: /basePath/basePath/foo).
+  //   - NextResponse.redirect() requires an absolute URL — `new URL(path,
+  //     req.url)` resolves against the INTERNAL origin (e.g.
+  //     http://0.0.0.0:3010/...) because cal.diy sits behind a rewrite
+  //     proxy and req.url reflects the upstream connection, not the
+  //     public browser-visible origin. The browser would then try to
+  //     navigate to that internal address and fail.
+  //
+  // A relative Location header on a plain Response sidesteps both:
+  // browsers resolve relative URLs against the origin of the document
+  // that received the response — i.e. the public PM Hub URL the iframe
+  // is actually loading from.
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+  const bareRoute = route.startsWith("/") ? route : `/${route}`;
   const fullPath = `${basePath}${bareRoute}`;
   return new Response(null, {
     status: 307,

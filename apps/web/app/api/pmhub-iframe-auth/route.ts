@@ -171,7 +171,24 @@ export async function GET(req: Request): Promise<NextResponse | Response | never
   });
 
   // 7. Redirect inside the iframe to the target route.
-  redirect(route);
+  //
+  // Ported from cal.diy main (commit chain post-R7.7). The simpler
+  // redirect(route) regressed: in Next 16 production with basePath set,
+  // next/navigation redirect() does NOT prepend the basePath when called
+  // from a route handler, so Location went out as /event-types and the
+  // browser loaded PM Hub's 404 (chrome included) into the iframe
+  // instead of cal.diy. Neither NextResponse.redirect (which resolves
+  // against the internal 0.0.0.0:3010 origin) nor next/navigation
+  // redirect work — main settled on a raw Response with a relative
+  // Location header that the browser resolves against the document
+  // origin (the public PM Hub URL).
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
+  const bareRoute = route.startsWith('/') ? route : `/${route}`;
+  const fullPath = `${basePath}${bareRoute}`;
+  return new Response(null, {
+    status: 307,
+    headers: { Location: fullPath },
+  });
 }
 
 function jsonError(status: number, message: string): NextResponse {

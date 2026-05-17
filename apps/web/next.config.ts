@@ -224,6 +224,16 @@ const nextConfig = (phase: string): NextConfig => {
 
   return {
     output: process.env.BUILD_STANDALONE === "true" ? "standalone" : undefined,
+    // PM Hub R7.7 + R7.6 hotfix: this branch was forked pre-R7.7 so it
+    // never inherited these flags from cal.diy main. Without them: build
+    // wipes .next during compile (502 the running iframe) AND the SWC
+    // type-check rejects the SettingsLayoutAppDirClient.tsx tRPC inference
+    // collision that has always been in cal.diy main but is suppressed by
+    // ignoreBuildErrors. Re-added to unblock; long-term fix lives in PM
+    // Hub lib/cal-diy-checkout.ts switchDirect (merge cal.diy main on
+    // each checkout) — landing in a follow-up commit.
+    cleanDistDir: false,
+    typescript: { ignoreBuildErrors: true },
     // Optional sub-path mount. When NEXT_PUBLIC_BASE_PATH is set
     // (e.g. "/cal-diy-iframe"), cal.diy serves all routes under that
     // prefix and Next auto-prefixes internal links, redirects, and

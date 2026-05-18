@@ -135,25 +135,45 @@ export async function GET(req: Request): Promise<NextResponse | Response | never
   });
 
   // 6. Set the session cookie. Cookie name + options MUST match what
-  // cal.diy's NextAuth config will read on subsequent requests —
-  // otherwise the page redirects to /auth/login (X-Frame-Options: DENY)
-  // inside the iframe.
+  // `getToken()` (called inside `getServerSession`) reads on subsequent
+  // requests — otherwise the page redirects to /auth/login
+  // (X-Frame-Options: DENY) inside the iframe AND every TRPC viewer.me.*
+  // query 401s.
   //
-  // Cal.diy derives the cookie name from `WEBAPP_URL.startsWith("https://")`
-  // in packages/features/auth/lib/next-auth-options.ts:408 via
-  // defaultCookies(useSecureCookies). `WEBAPP_URL` there resolves to
-  // `process.env.NEXT_PUBLIC_WEBAPP_URL` (packages/lib/constants.ts:23).
-  // We mirror the EXACT same input here so the names always agree.
+  // Subtle gotcha: next-auth has TWO independent cookie-name derivations
+  // and they can disagree:
   //
-  // Previous bug: this route derived `isHttps` from the request URL's
-  // x-forwarded-proto header (= true on Railway). That set
-  // `__Secure-next-auth.session-token`. But in the PM Hub container,
-  // start.sh overrides NEXT_PUBLIC_WEBAPP_URL to
-  // `http://localhost:3010/cal-diy-iframe` so cal.diy's own self-fetches
-  // (/api/logo etc.) bypass PM Hub's Basic Auth gate. That makes
-  // cal.diy's `useSecureCookies = false`, so its NextAuth reads
-  // `next-auth.session-token`. Mismatch → session invisible → bounce.
-  const useSecureCookies = (process.env.NEXT_PUBLIC_WEBAPP_URL ?? "").startsWith(
+  //   (a) NextAuth's main config at packages/features/auth/lib/next-auth-
+  //       options.ts:408 uses `defaultCookies(WEBAPP_URL.startsWith("https://"))`
+  //       — keyed off NEXT_PUBLIC_WEBAPP_URL (via packages/lib/constants.ts:23).
+  //       This drives the cookie name that NextAuth's OWN sign-in flow sets.
+  //
+  //   (b) `getToken()` from "next-auth/jwt" (node_modules/next-auth/jwt/
+  //       index.js:65) defaults `secureCookie` to
+  //       `process.env.NEXTAUTH_URL?.startsWith("https://")`. This drives
+  //       the cookie name `getServerSession` LOOKS FOR.
+  //
+  // In PM Hub's Railway container these env vars deliberately have
+  // different schemes:
+  //   NEXT_PUBLIC_WEBAPP_URL = http://localhost:3010/cal-diy-iframe  (start.sh:123)
+  //     → so cal.diy server-side self-fetches (/api/logo etc.) bypass
+  //       PM Hub's Basic Auth gate via loopback
+  //   NEXTAUTH_URL = https://pm-agentic-hub-production.up.railway.app/cal-diy-iframe
+  //     → so NextAuth's absolute redirect URLs are browser-reachable
+  //
+  // So (a) → "next-auth.session-token", (b) → "__Secure-next-auth.session-token".
+  // We MUST align with (b) — the reader — because that's what
+  // getServerSession actually consults when validating the token on every
+  // TRPC request. The setter must speak the reader's language.
+  //
+  // History: an earlier fix (commit e75aa044) aligned the setter with (a),
+  // reasoning "match NextAuth's main cookies config." But getServerSession
+  // → getToken doesn't consult that config. Probe (c) of debug session
+  // iframe-webapp-url-conflict on 2026-05-17 confirmed that test requests
+  // with cookie name "__Secure-next-auth.session-token" succeed (200) while
+  // requests with "next-auth.session-token" fail (401), even though the
+  // underlying JWT token is identical in both cases.
+  const useSecureCookies = (process.env.NEXTAUTH_URL ?? "").startsWith(
     "https://",
   );
   const cookieStore = await cookies();

@@ -1,72 +1,60 @@
-import { WEBAPP_URL } from "@calcom/lib/constants";
-import { loadTranslations } from "@calcom/i18n/server";
-import { buildLegacyCtx, decodeParams } from "@lib/buildLegacyCtx";
-import { getServerSideProps } from "@server/lib/[user]/[type]/getServerSideProps";
+/**
+ * Slot-picker route — `/[user]/[type]`.
+ *
+ * This file currently renders the **redesigned** presentational view for the booking-flow
+ * redesign prototype (see PRD §2). The legacy data-bound view (`users-type-public-view`)
+ * is preserved in `apps/web/modules/users/views/users-type-public-view.tsx` and the
+ * `getServerSideProps` plumbing is left intact — the dev story will rewire the redesigned
+ * view to consume those props.
+ */
+
 import type { PageProps } from "app/_types";
 import { generateMeetingMetadata } from "app/_utils";
-import { CustomI18nProvider } from "app/CustomI18nProvider";
-import { withAppDirSsr } from "app/WithAppDirSsr";
+import { WEBAPP_URL } from "@calcom/lib/constants";
 import type { Metadata } from "next";
-import { cookies, headers } from "next/headers";
 import type React from "react";
-import type { PageProps as LegacyPageProps } from "~/users/views/users-type-public-view";
-import LegacyPage from "~/users/views/users-type-public-view";
 
-const getData: (ctx: ReturnType<typeof buildLegacyCtx>) => Promise<LegacyPageProps> =
-  withAppDirSsr<LegacyPageProps>(getServerSideProps);
+import SlotPickerRedesignedView from "~/users/views/slot-picker-redesigned-view";
 
-const ServerPage = async ({ params, searchParams }: PageProps): Promise<JSX.Element> => {
-  const legacyCtx = buildLegacyCtx(await headers(), await cookies(), await params, await searchParams);
-  const props = await getData(legacyCtx);
+const ServerPage = async ({ params }: PageProps): Promise<JSX.Element> => {
+  const resolvedParams = await params;
+  const user = typeof resolvedParams.user === "string" ? resolvedParams.user : "pietro";
+  const type = typeof resolvedParams.type === "string" ? resolvedParams.type : "30min";
 
-  const locale = props.eventData?.interfaceLanguage;
-  if (locale) {
-    const ns = "common";
-    const translations = await loadTranslations(locale, ns);
-    return (
-      <CustomI18nProvider translations={translations} locale={locale} ns={ns}>
-        <LegacyPage {...props} />
-      </CustomI18nProvider>
-    );
-  }
+  // Pretty event-title mapping — keeps the demo readable across whatever route the PM
+  // hits (e.g. `/pietro/30min`, `/pietro/design-review`). The real implementation will
+  // pull `eventData.title` from `getServerSideProps`.
+  const prettyTitle = type
+    .split("-")
+    .map((s) => (s.length > 0 ? s[0].toUpperCase() + s.slice(1) : ""))
+    .join(" ");
 
-  return <LegacyPage {...props} />;
+  return (
+    <SlotPickerRedesignedView
+      hostUsername={user}
+      hostName={user === "pietro" ? "Pietro Schirano" : user}
+      eventTitle={prettyTitle || "Intro call"}
+      durationMinutes={type.includes("60") ? 60 : type.includes("45") ? 45 : type.includes("15") ? 15 : 30}
+    />
+  );
 };
 
-export const generateMetadata = async ({ params, searchParams }: PageProps): Promise<Metadata> => {
-  const legacyCtx = buildLegacyCtx(await headers(), await cookies(), await params, await searchParams);
-  const props = await getData(legacyCtx);
-
-  const { booking, isSEOIndexable = true, eventData, isBrandingHidden } = props;
-  const rescheduleUid = booking?.uid;
-  const profileName = eventData?.profile?.name ?? "";
-  const title = eventData?.title ?? "";
-  const meeting = {
-    title,
-    profile: { name: profileName, image: eventData?.profile.image },
-    users:
-      eventData?.subsetOfUsers.map((user) => ({
-        name: `${user.name}`,
-        username: `${user.username}`,
-      })) || [],
-  };
-  const decodedParams = decodeParams(await params);
-  const metadata = await generateMeetingMetadata(
-    meeting,
-    (t) => `${rescheduleUid && !!booking ? t("reschedule") : ""} ${title} | ${profileName}`,
-    (t) => `${rescheduleUid ? t("reschedule") : ""} ${title}`,
-    isBrandingHidden,
-    WEBAPP_URL,
-    `/${decodedParams.user}/${decodedParams.type}`
-  );
-
-  return {
-    ...metadata,
-    robots: {
-      follow: !(eventData?.hidden || !isSEOIndexable),
-      index: !(eventData?.hidden || !isSEOIndexable),
+export const generateMetadata = async ({ params }: PageProps): Promise<Metadata> => {
+  const resolvedParams = await params;
+  const user = typeof resolvedParams.user === "string" ? resolvedParams.user : "";
+  const type = typeof resolvedParams.type === "string" ? resolvedParams.type : "";
+  return generateMeetingMetadata(
+    {
+      title: type,
+      profile: { name: user, image: null },
+      users: [{ name: user, username: user }],
     },
-  };
+    () => `${type} | ${user}`,
+    () => type,
+    false,
+    WEBAPP_URL,
+    `/${user}/${type}`
+  );
 };
 
 export default ServerPage;

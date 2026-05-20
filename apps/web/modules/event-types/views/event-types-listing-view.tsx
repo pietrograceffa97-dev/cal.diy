@@ -30,7 +30,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@calcom/ui/components/dropdown";
-import { EmptyScreen } from "@calcom/ui/components/empty-screen";
+import {
+  EmptyScreen,
+  EventTypesEmptyIllustration,
+  IllustratedEmptyScreen,
+} from "@calcom/ui/components/empty-screen";
 import { Label, Switch, TextField } from "@calcom/ui/components/form";
 import { HorizontalTabs } from "@calcom/ui/components/navigation";
 import { Skeleton } from "@calcom/ui/components/skeleton";
@@ -892,17 +896,40 @@ export const InfiniteEventTypeList = ({
   );
 };
 
+/**
+ * Empty state shown when a host has no event types yet (personal scope).
+ *
+ * Uses the new illustration-led `IllustratedEmptyScreen` so this surface
+ * matches the unified host-dashboard empty-state pattern. When a search
+ * filter is active and yielded zero results, we keep the icon-based
+ * `EmptyScreen` instead — search-zero-results is a different intent
+ * (refine your query) and shouldn't get a celebratory illustration.
+ */
 const CreateFirstEventTypeView = ({ slug, searchTerm }: { slug: string; searchTerm?: string }) => {
   const { t } = useLocale();
 
+  if (searchTerm) {
+    return (
+      <EmptyScreen
+        Icon="search"
+        headline={t("no_result_found_for", { searchTerm })}
+        description={t("new_event_type_description")}
+        className="mb-16"
+      />
+    );
+  }
+
   return (
-    <EmptyScreen
-      Icon="link"
-      headline={searchTerm ? t("no_result_found_for", { searchTerm }) : t("new_event_type_heading")}
+    <IllustratedEmptyScreen
+      data-testid="event-types-empty-state"
+      illustration={<EventTypesEmptyIllustration />}
+      headline={t("new_event_type_heading")}
       description={t("new_event_type_description")}
-      className="mb-16"
       buttonRaw={
-        <Button href={`?dialog=new&eventPage=${slug}`} variant="button">
+        <Button
+          data-testid="create-first-event-type"
+          href={`?dialog=new&eventPage=${slug}`}
+          variant="button">
           {t("create")}
         </Button>
       }
@@ -940,6 +967,13 @@ const CTA = ({ profileOptions }: { profileOptions: ProfileOption[] }) => {
   );
 };
 
+/**
+ * Empty state shown when a team has no event types yet.
+ *
+ * Mirrors the personal-scope empty state above for visual coherence —
+ * same illustration, same single-CTA pattern — just with team-specific
+ * copy and the team-scoped create link.
+ */
 const EmptyEventTypeList = ({
   group,
   searchTerm,
@@ -948,12 +982,24 @@ const EmptyEventTypeList = ({
   searchTerm?: string;
 }) => {
   const { t } = useLocale();
+
+  if (searchTerm) {
+    return (
+      <EmptyScreen
+        Icon="search"
+        headline={t("no_result_found_for", { searchTerm })}
+        description={t("new_team_event_type_description")}
+        className="mb-16"
+      />
+    );
+  }
+
   return (
-    <EmptyScreen
-      Icon="link"
-      headline={searchTerm ? t("no_result_found_for", { searchTerm }) : t("team_no_event_types")}
+    <IllustratedEmptyScreen
+      data-testid="team-event-types-empty-state"
+      illustration={<EventTypesEmptyIllustration />}
+      headline={t("team_no_event_types")}
       description={t("new_team_event_type_description")}
-      className="mb-16"
       buttonRaw={
         <Button href={`?dialog=new&eventPage=${group.profile.slug}&teamId=${group.teamId}`} variant="button">
           {t("create")}

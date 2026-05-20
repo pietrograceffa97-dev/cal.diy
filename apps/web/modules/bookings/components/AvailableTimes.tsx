@@ -255,14 +255,56 @@ const SlotItem = ({
   );
 };
 
+/**
+ * Empty-state shown when a guest selects a date that has no slots.
+ *
+ * Mirrors the unified outcome-state pattern used on the post-booking
+ * confirmation card: icon (illustration) + headline + supporting copy +
+ * primary CTA. Replaces the previous flat "all_booked_today" message which
+ * gave guests no `why` and no `what next`.
+ *
+ * The CTA clears `selectedDate` on the Booker store — that returns the user
+ * to the month view, which is the closest thing to a "pick another date"
+ * action without adding new routing. Existing date-picker chrome on the page
+ * is untouched.
+ */
+const NoSlotsAvailable = () => {
+  const { t } = useLocale();
+  const setSelectedDate = useBookerStoreContext((state) => state.setSelectedDate);
+
+  return (
+    <div
+      data-testId="no-slots-available"
+      data-preview-state="empty"
+      className="bg-subtle border-subtle flex h-full flex-col items-center rounded-md border px-6 py-8 text-center dark:bg-transparent">
+      <div
+        aria-hidden
+        className="bg-default border-subtle mb-4 flex h-12 w-12 items-center justify-center rounded-full border">
+        <CalendarX2Icon className="text-subtle h-5 w-5" />
+      </div>
+      <h3 className="text-emphasis text-base font-semibold leading-6">{t("all_booked_today")}</h3>
+      <p className="text-subtle mt-2 max-w-[260px] text-sm leading-5">
+        {t("no_slots_available_on_this_day_description") ||
+          "There are no openings on this day. Try a different date — the calendar shows the next available days in bold."}
+      </p>
+      <Button
+        color="secondary"
+        size="sm"
+        className="mt-5"
+        onClick={() => setSelectedDate({ date: null })}
+        data-testid="no-slots-pick-another-date">
+        {t("pick_another_date") || "Pick another date"}
+      </Button>
+    </div>
+  );
+};
+
 export const AvailableTimes = ({
   slots,
   showTimeFormatToggle = true,
   className,
   ...props
 }: AvailableTimesProps) => {
-  const { t } = useLocale();
-
   const oooAllDay = slots.every((slot) => slot.away);
   if (oooAllDay) {
     return <OOOSlot {...slots[0]} />;
@@ -275,16 +317,7 @@ export const AvailableTimes = ({
   return (
     <div className={classNames("text-default flex flex-col", className)}>
       <div className="h-full pb-4">
-        {!slots.length && (
-          <div
-            data-testId="no-slots-available"
-            className="bg-subtle border-subtle flex h-full flex-col items-center rounded-md border p-6 dark:bg-transparent">
-            <CalendarX2Icon className="text-muted mb-2 h-4 w-4" />
-            <p className={classNames("text-muted", showTimeFormatToggle ? "-mt-1 text-lg" : "text-sm")}>
-              {t("all_booked_today")}
-            </p>
-          </div>
-        )}
+        {!slots.length && <NoSlotsAvailable />}
         {oooBeforeSlots && !oooAfterSlots && <OOOSlot {...slots[0]} />}
         {slots.map((slot) => {
           if (slot.away) return null;

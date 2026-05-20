@@ -4,7 +4,8 @@ import { getPlaceholderAvatar } from "@calcom/lib/defaultAvatarImage";
 import { useLocale } from "@calcom/lib/hooks/useLocale";
 import { Avatar } from "@calcom/ui/components/avatar";
 import { Badge } from "@calcom/ui/components/badge";
-import { CheckIcon, XIcon } from "@coss/ui/icons";
+import { Button } from "@calcom/ui/components/button";
+import { CheckIcon, ClockIcon, XIcon } from "@coss/ui/icons";
 import { BookingSuccessActions } from "./BookingSuccessActions";
 import { BookingSuccessAddToCalendar } from "./BookingSuccessAddToCalendar";
 import { BookingSuccessLocationRow } from "./BookingSuccessLocationRow";
@@ -41,6 +42,10 @@ export interface BookingSuccessCardProps {
   isCancelled?: boolean;
   cancellationReason?: string | null;
   cancelledBy?: string | null;
+  // Optional href used by the cancelled-state "Book again" CTA. When set, the
+  // cancelled card surfaces a primary action that returns the guest to the
+  // event-type page so they can rebook. Typically `/<username>/<event-slug>`.
+  rebookHref?: string | null;
 }
 
 export function BookingSuccessCard({
@@ -64,6 +69,7 @@ export function BookingSuccessCard({
   isCancelled = false,
   cancellationReason,
   cancelledBy,
+  rebookHref,
 }: BookingSuccessCardProps) {
   const { t } = useLocale();
 
@@ -76,7 +82,9 @@ export function BookingSuccessCard({
     return t("youre_booked");
   })();
   const subtitle = (() => {
-    if (isCancelled) return null;
+    if (isCancelled) {
+      return t("booking_cancelled_description") || "This meeting is no longer scheduled. You can book a new time below.";
+    }
     if (needsConfirmation) {
       return approverName
         ? t("user_needs_to_confirm_or_reject_booking", { user: approverName })
@@ -93,6 +101,39 @@ export function BookingSuccessCard({
   ].filter((a): a is { name: string | null; email: string } => a !== null);
   const calendarOrganizer = hostEmail ? { name: hostName, email: hostEmail } : undefined;
 
+  // Status-icon state — picks the illustration that maps to the unified
+  // outcome-state pattern. Cancelled is destructive, pending is attention
+  // (the high-stakes case the PRD calls out for clear distinction from
+  // confirmed), confirmed is success.
+  const statusIcon = (() => {
+    if (isCancelled) {
+      return {
+        bg: "bg-error",
+        node: <XIcon className="h-5 w-5 text-red-700 dark:text-red-200" aria-hidden="true" />,
+      };
+    }
+    if (needsConfirmation) {
+      return {
+        bg: "bg-attention",
+        node: <ClockIcon className="h-5 w-5 text-yellow-700 dark:text-yellow-200" aria-hidden="true" />,
+      };
+    }
+    return {
+      bg: "bg-cal-success",
+      node: <CheckIcon className="h-5 w-5 text-green-700 dark:text-green-400" aria-hidden="true" />,
+    };
+  })();
+
+  // Status badge in the header — gives a screen-reader-accessible, text-bearing
+  // signal of state that doesn't rely on the icon color alone. PRD: "Status
+  // (pending/cancelled) must be conveyed via text, not color alone."
+  const statusBadge = (() => {
+    if (isCancelled) return { variant: "red" as const, label: t("cancelled") || "Cancelled" };
+    if (needsConfirmation)
+      return { variant: "warning" as const, label: t("awaiting_confirmation") || "Awaiting confirmation" };
+    return null;
+  })();
+
   return (
     <div className="min-h-screen" data-testid="success-page">
       <main className="mx-auto max-w-3xl px-4 py-6 sm:py-16" aria-labelledby="booking-success-headline">
@@ -102,22 +143,29 @@ export function BookingSuccessCard({
             data-needs-confirmation={needsConfirmation || undefined}
             data-cancelled={isCancelled || undefined}>
             <div
-              className={`mx-auto flex h-12 w-12 items-center justify-center rounded-full ${
-                isCancelled ? "bg-error" : "bg-cal-success"
-              }`}>
-              {isCancelled ? (
-                <XIcon className="h-5 w-5 text-red-700 dark:text-red-200" aria-hidden="true" />
-              ) : (
-                <CheckIcon className="h-5 w-5 text-green-700 dark:text-green-400" aria-hidden="true" />
-              )}
+              className={`mx-auto flex h-12 w-12 items-center justify-center rounded-full ${statusIcon.bg}`}>
+              {statusIcon.node}
             </div>
+            {statusBadge && (
+              <div className="mt-4 flex justify-center">
+                <Badge variant={statusBadge.variant} size="md">
+                  {statusBadge.label}
+                </Badge>
+              </div>
+            )}
             <h1
               id="booking-success-headline"
-              className="text-emphasis mt-6 text-2xl font-semibold leading-7"
+              className="text-emphasis mt-4 text-2xl font-semibold leading-7"
               data-testid={isCancelled ? "cancelled-headline" : undefined}>
               {headline}
             </h1>
             {subtitle && <p className="text-default mt-3 text-sm leading-5">{subtitle}</p>}
+            {needsConfirmation && (
+              <p className="text-subtle mx-auto mt-3 max-w-md text-sm leading-5">
+                {t("pending_what_happens_next") ||
+                  "We've sent your request. You'll get an email as soon as it's approved — your meeting is not on the calendar yet."}
+              </p>
+            )}
           </header>
 
           <section
@@ -215,7 +263,12 @@ export function BookingSuccessCard({
             </dl>
           </section>
 
-          {!isCancelled && (
+          {/* Confirmed: primary add-to-calendar + reschedule/cancel.
+              Pending: reschedule/cancel only — no add-to-calendar (the
+              meeting isn't real yet; PRD).
+              Cancelled: primary "Book again" CTA only — reschedule/cancel
+              no longer apply. */}
+          {!isCancelled && !needsConfirmation && (
             <div
               className="border-subtle flex flex-wrap items-center gap-3 border-t px-6 py-6 sm:px-10"
               data-testid="booking-success-actions">
@@ -238,6 +291,36 @@ export function BookingSuccessCard({
                   rescheduledBy={attendeeEmail}
                 />
               )}
+            </div>
+          )}
+
+          {!isCancelled && needsConfirmation && uid && (
+            <div
+              className="border-subtle flex flex-wrap items-center gap-3 border-t px-6 py-6 sm:px-10"
+              data-testid="booking-success-actions">
+              <BookingSuccessActions
+                uid={uid}
+                title={title}
+                formattedDate={formattedDate}
+                formattedTime={formattedTime}
+                formattedEndTime={endTime}
+                formattedTimeZone={formattedTimeZone}
+                rescheduledBy={attendeeEmail}
+              />
+            </div>
+          )}
+
+          {isCancelled && (
+            <div
+              className="border-subtle border-t px-6 py-6 sm:px-10"
+              data-testid="booking-cancelled-actions">
+              <Button
+                color="primary"
+                href={rebookHref || "/"}
+                className="w-full justify-center"
+                data-testid="booking-rebook">
+                {t("book_again") || "Book again"}
+              </Button>
             </div>
           )}
         </div>

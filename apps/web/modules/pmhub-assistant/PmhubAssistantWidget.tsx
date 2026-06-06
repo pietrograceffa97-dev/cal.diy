@@ -185,15 +185,15 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
     requestAnimationFrame(resizeInput);
 
     const intent = classify(trimmed);
-    if (intent === "ask" || intent === "feedback") {
-      // Simulated shells (Phases 2–3) — keep the brief "thinking" beat.
+    if (intent === "feedback") {
+      // Simulated shell (Phase 3) — keep the brief "thinking" beat.
       setTyping(true);
       window.setTimeout(() => {
         setTyping(false);
         pushBot(intent, el, trimmed);
       }, 700);
     } else {
-      // Real flows: the bot component handles its own loading state.
+      // Real flows (testrun / bug / ask): the bot component handles its own loading state.
       pushBot(intent, el, trimmed);
     }
   }
@@ -477,11 +477,13 @@ function BotMessage({
       )}
 
       {intent === "ask" && (
-        <div className="pmha-bub">
-          That element{ref} uses cal.diy’s <code>bg-default</code> surface with <code>text-emphasis</code> text —
-          styled as a <b>secondary</b> action. <i>(Grounded answers from Confluence / Jira / the cal.diy source are
-          coming — this flow isn’t wired to the backend yet.)</i>
-        </div>
+        <AskBody
+          question={text}
+          route={route}
+          el={el}
+          projectId={projectId}
+          scrollToBottom={scrollToBottom}
+        />
       )}
 
       {intent === "feedback" && (
@@ -492,6 +494,169 @@ function BotMessage({
       )}
     </div>
   );
+}
+
+/* ------------------------------ ask flow (real) ------------------------------ */
+
+type AskStatus = "pending" | "answered" | "errored";
+
+function AskBody({
+  question,
+  route,
+  el,
+  projectId,
+  scrollToBottom,
+}: {
+  question: string;
+  route: string;
+  el: PickedElement | null;
+  projectId: string | null;
+  scrollToBottom: () => void;
+}) {
+  const [phase, setPhase] = useState<"loading" | "answered" | "error">("loading");
+  const [answer, setAnswer] = useState("");
+  const [error, setError] = useState("");
+  const [via, setVia] = useState<"relay" | "cloud" | null>(null);
+  const ranRef = useRef(false);
+
+  // Fire once. Mirrors BugBody's ranRef pattern (no cleanup/cancellation): under
+  // React StrictMode's dev double-invoke, a cleanup that flips a `cancelled` flag
+  // would kill the mount-1 poll loop while the ranRef guard blocks mount-2 from
+  // restarting it — leaving the widget stuck on "Thinking…". setState after a real
+  // unmount is a benign no-op, so we don't guard it.
+  useEffect(() => {
+    if (ranRef.current) return;
+    ranRef.current = true;
+
+    (async () => {
+      const submit = await pmhubPost<{ ok: boolean; id: string; dispatched: "relay" | "cloud" }>("ask", {
+        question,
+        projectId,
+        route,
+        element: toElementContext(el),
+      });
+      if (!submit.ok || !submit.data?.id) {
+        setError(submit.ok ? "The assistant didn’t accept the question." : submit.error);
+        setPhase("error");
+        scrollToBottom();
+        return;
+      }
+      setVia(submit.data.dispatched);
+      const id = submit.data.id;
+
+      // Poll up to ~120s for the async answer (relay $0 / cloud Sonnet).
+      const deadline = Date.now() + 120_000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 1800));
+        const poll = await pmhubGet<{ status: AskStatus; answer: string | null; error: string | null }>(
+          `ask/${id}`
+        );
+        if (!poll.ok) continue; // transient — keep polling
+        const st = poll.data?.status;
+        if (st === "answered") {
+          setAnswer(poll.data?.answer ?? "");
+          setPhase("answered");
+          scrollToBottom();
+          return;
+        }
+        if (st === "errored") {
+          setError(poll.data?.error ?? "The assistant hit an error.");
+          setPhase("error");
+          scrollToBottom();
+          return;
+        }
+      }
+      setError("Timed out waiting for an answer — try again.");
+      setPhase("error");
+      scrollToBottom();
+    })();
+  }, [question, projectId, route, el, scrollToBottom]);
+
+  if (phase === "loading") {
+    return (
+      <div className="pmha-bub" data-testid="pmhub-assistant.ask.loading">
+        {via === "relay" ? "Answering on Claude Code…" : "Thinking…"}
+        <div className="pmha-askmeta">grounded in Confluence · Jira · the cal.diy design system</div>
+        <div className="pmha-typing" style={{ marginTop: 8 }}>
+          <span />
+          <span />
+          <span />
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === "error") {
+    return (
+      <div className="pmha-bub" data-testid="pmhub-assistant.ask.error">
+        I couldn’t answer that: {error}
+      </div>
+    );
+  }
+
+  return (
+    <div className="pmha-bub pmha-answer" data-testid="pmhub-assistant.ask.answer">
+      <Markish text={answer} />
+    </div>
+  );
+}
+
+/** Minimal, dependency-free markdown renderer: blank-line paragraphs, `- ` bullets,
+ *  inline **bold** + `code`. No HTML injection — everything is React nodes. */
+function Markish({ text }: { text: string }) {
+  const out: JSX.Element[] = [];
+  let bullets: string[] = [];
+  const flushBullets = () => {
+    if (bullets.length === 0) return;
+    const items = bullets;
+    out.push(
+      <ul key={`ul-${out.length}`} className="pmha-mdul">
+        {items.map((b, i) => (
+          <li key={i}>{inlineMd(b)}</li>
+        ))}
+      </ul>
+    );
+    bullets = [];
+  };
+  for (const raw of text.split("\n")) {
+    const line = raw.replace(/\r$/, "");
+    const bullet = /^\s*[-*]\s+(.*)$/.exec(line);
+    if (bullet) {
+      bullets.push(bullet[1]);
+      continue;
+    }
+    flushBullets();
+    if (line.trim() === "") {
+      out.push(<div key={`sp-${out.length}`} className="pmha-mdsp" />);
+    } else {
+      out.push(
+        <p key={`p-${out.length}`} className="pmha-mdp">
+          {inlineMd(line)}
+        </p>
+      );
+    }
+  }
+  flushBullets();
+  return <>{out}</>;
+}
+
+function inlineMd(s: string): (string | JSX.Element)[] {
+  const parts: (string | JSX.Element)[] = [];
+  // **bold** before *italic* (so `**` isn't mis-read as two `*`); then `code`.
+  const re = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g;
+  let last = 0;
+  let key = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s))) {
+    if (m.index > last) parts.push(s.slice(last, m.index));
+    const tok = m[0];
+    if (tok.startsWith("**")) parts.push(<b key={key++}>{tok.slice(2, -2)}</b>);
+    else if (tok.startsWith("*")) parts.push(<i key={key++}>{tok.slice(1, -1)}</i>);
+    else parts.push(<code key={key++}>{tok.slice(1, -1)}</code>);
+    last = m.index + tok.length;
+  }
+  if (last < s.length) parts.push(s.slice(last));
+  return parts;
 }
 
 /* ------------------------------ bug flow (real) ------------------------------ */
@@ -1325,6 +1490,15 @@ function WidgetStyles() {
       .pmha-bot .pmha-bub{background:var(--subtle);color:var(--def);border-bottom-left-radius:5px}
       .pmha-root code{font-family:var(--mono),ui-monospace,monospace;font-size:11px;
         background:color-mix(in srgb,var(--emph) 7%,transparent);padding:1px 4px;border-radius:4px}
+      .pmha-askmeta{font-size:10.5px;color:var(--sub);margin-top:3px;line-height:1.4}
+      .pmha-answer{max-width:92%}
+      .pmha-mdp{margin:0 0 7px}
+      .pmha-answer > .pmha-mdp:last-child{margin-bottom:0}
+      .pmha-mdul{margin:3px 0 8px;padding-left:17px;display:flex;flex-direction:column;gap:4px}
+      .pmha-answer > .pmha-mdul:last-child{margin-bottom:0}
+      .pmha-mdul li{line-height:1.5}
+      .pmha-mdsp{height:3px}
+      .pmha-answer b{color:var(--emph);font-weight:650}
       .pmha-intent{display:inline-flex;align-items:center;gap:7px;font-size:10.5px;font-weight:600;color:var(--sub)}
       .pmha-pill{display:inline-flex;align-items:center;gap:5px;background:var(--subtle);border:1px solid var(--hair);
         border-radius:999px;padding:2px 9px 2px 7px;color:var(--emph)}

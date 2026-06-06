@@ -185,17 +185,9 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
     requestAnimationFrame(resizeInput);
 
     const intent = classify(trimmed);
-    if (intent === "feedback") {
-      // Simulated shell (Phase 3) — keep the brief "thinking" beat.
-      setTyping(true);
-      window.setTimeout(() => {
-        setTyping(false);
-        pushBot(intent, el, trimmed);
-      }, 700);
-    } else {
-      // Real flows (testrun / bug / ask): the bot component handles its own loading state.
-      pushBot(intent, el, trimmed);
-    }
+    // All intents (testrun / bug / ask / feedback) are real now — the bot
+    // component handles its own loading state.
+    pushBot(intent, el, trimmed);
   }
 
   function launchTestCase() {
@@ -487,10 +479,13 @@ function BotMessage({
       )}
 
       {intent === "feedback" && (
-        <div className="pmha-bub">
-          Got it — noted as feedback{ref}.{" "}
-          <i>(The Auto-improve board capture isn’t wired to the backend yet — coming next.)</i>
-        </div>
+        <FeedbackBody
+          text={text}
+          route={route}
+          el={el}
+          projectId={projectId}
+          scrollToBottom={scrollToBottom}
+        />
       )}
     </div>
   );
@@ -657,6 +652,67 @@ function inlineMd(s: string): (string | JSX.Element)[] {
   }
   if (last < s.length) parts.push(s.slice(last));
   return parts;
+}
+
+/* ------------------------------ feedback flow (real) ------------------------------ */
+
+function FeedbackBody({
+  text,
+  route,
+  el,
+  projectId,
+  scrollToBottom,
+}: {
+  text: string;
+  route: string;
+  el: PickedElement | null;
+  projectId: string | null;
+  scrollToBottom: () => void;
+}) {
+  const [phase, setPhase] = useState<"sending" | "sent" | "error">("sending");
+  const [error, setError] = useState("");
+  const ranRef = useRef(false);
+
+  // Fire once (no cleanup/cancel) — see AskBody for the StrictMode rationale.
+  useEffect(() => {
+    if (ranRef.current) return;
+    ranRef.current = true;
+    (async () => {
+      const res = await pmhubPost<{ ok: boolean; id: string }>("feedback", {
+        text,
+        projectId,
+        route,
+        element: el ? { selector: el.selector, tag: el.tag, text: el.text } : undefined,
+      });
+      if (res.ok && res.data?.ok) {
+        setPhase("sent");
+      } else {
+        setError(res.ok ? "I couldn’t save that." : res.error);
+        setPhase("error");
+      }
+      scrollToBottom();
+    })();
+  }, [text, projectId, route, el, scrollToBottom]);
+
+  if (phase === "sending") {
+    return (
+      <div className="pmha-bub" data-testid="pmhub-assistant.feedback.sending">
+        Logging your feedback…
+      </div>
+    );
+  }
+  if (phase === "error") {
+    return (
+      <div className="pmha-bub" data-testid="pmhub-assistant.feedback.error">
+        I couldn’t log that: {error}
+      </div>
+    );
+  }
+  return (
+    <div className="pmha-bub" data-testid="pmhub-assistant.feedback.sent">
+      Logged to the <b>Auto-improve board</b> ✓ — thanks. The PM reviews these for what to fix next.
+    </div>
+  );
 }
 
 /* ------------------------------ bug flow (real) ------------------------------ */

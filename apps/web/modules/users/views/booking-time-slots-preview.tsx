@@ -68,7 +68,7 @@ export function BookingTimeSlotsPreview({ variant }: Props) {
                 <span className="text-subtle text-sm">{MOCK_EVENT.hostName}</span>
               </div>
             </div>
-            <h1 className="text-emphasis mt-4 text-2xl font-semibold leading-tight">
+            <h1 className="text-emphasis mt-4 text-xl font-semibold leading-tight">
               {MOCK_EVENT.title}
             </h1>
             <dl className="mt-6 space-y-3">

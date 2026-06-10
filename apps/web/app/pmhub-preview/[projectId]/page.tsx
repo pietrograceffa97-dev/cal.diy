@@ -27,7 +27,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   robots: { index: false, follow: false },
-  title: "PM Hub preview · cal.diy",
+  title: "Parallel preview · cal.diy",
 };
 
 type Props = {
@@ -88,7 +88,7 @@ export default async function PmHubPreviewPage({
           />
           <span style={{ fontWeight: 600 }}>cal.diy</span>
           <span style={{ color: "#9ca3af" }}>·</span>
-          <span style={{ color: "#6b7280" }}>PM Hub preview</span>
+          <span style={{ color: "#6b7280" }}>Parallel preview</span>
           {route ? (
             <>
               <span style={{ color: "#9ca3af" }}>·</span>
@@ -133,11 +133,11 @@ export default async function PmHubPreviewPage({
             borderRadius: 6,
           }}
         >
-          ← Back to PM Hub
+          ← Back to Parallel
         </a>
       </header>
       <iframe
-        title={`PM Hub prototype · ${projectId}`}
+        title={`Parallel prototype · ${projectId}`}
         src={prototypeSrc}
         sandbox="allow-scripts allow-same-origin allow-forms"
         style={{

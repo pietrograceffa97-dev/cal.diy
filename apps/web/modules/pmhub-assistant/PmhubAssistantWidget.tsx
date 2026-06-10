@@ -6,7 +6,8 @@ import { startElementPick, type PickedElement } from "./lib/elementPick";
 import { pmhubGet, pmhubPost } from "./lib/pmhubClient";
 
 /**
- * Native PM Hub assistant widget for cal.diy.
+ * Native Parallel assistant widget for cal.diy ("Parallel Assistant";
+ * Parallel is the PM Hub app — internal identifiers keep the pmhub name).
  *
  * A chomping iridescent orb (bottom-right) that unfolds into a single-chat
  * panel. No tabs — the assistant reads what you type and routes it: walk a
@@ -15,12 +16,16 @@ import { pmhubGet, pmhubPost } from "./lib/pmhubClient";
  * Story under the epic), ask **why** something behaves the way it does, or
  * leave **feedback**. The three capabilities surface as suggested prompts.
  *
- * Test + bug flows call PM Hub for real via cal.diy's same-origin proxy
- * (`/api/pmhub-assistant/*` → HMAC → PM Hub `/api/embed/*`). Ask + feedback are
+ * Test + bug flows call Parallel for real via cal.diy's same-origin proxy
+ * (`/api/pmhub-assistant/*` → HMAC → Parallel `/api/embed/*`). Ask + feedback are
  * the approved interaction shell pending their backends (Phases 2–3).
  *
+ * Deep link: Parallel's Step 6 "Open test URL" links carry
+ * `?pmhub_qa_project=` + `?pmhub_qa_scenario=` — the widget auto-opens
+ * straight into that scenario's walkthrough (one-shot per page load).
+ *
  * Self-contained scoped CSS (`.pmha-*`, light/dark via cal.diy's `.dark`),
- * Geist + JetBrains Mono. The iridescent gradient is PM Hub's brand signature.
+ * Geist + JetBrains Mono. The iridescent gradient is Parallel's brand signature.
  */
 
 type Props = {
@@ -32,7 +37,16 @@ type Intent = "testrun" | "bug" | "ask" | "feedback";
 
 type ChatMsg =
   | { id: number; role: "user"; text: string; el: PickedElement | null }
-  | { id: number; role: "bot"; intent: Intent; el: PickedElement | null; text: string; route: string };
+  | {
+      id: number;
+      role: "bot";
+      intent: Intent;
+      el: PickedElement | null;
+      text: string;
+      route: string;
+      /** Set when seeded by a `?pmhub_qa_scenario=` deep link — preselects that scenario in TestRunner. */
+      scenarioId?: string;
+    };
 
 /** An open triage conversation — set when the tester flags a step; drives the slide-in pane. */
 type TriageSession = {
@@ -56,6 +70,8 @@ const INTENT_ORDER: Intent[] = ["testrun", "bug", "ask", "feedback"];
 const PROJECT_BIND_KEY = "pmhub-assistant.project";
 /** Same id shape the preview overlay enforces — keeps crafted URLs out. */
 const PROJECT_BIND_REGEX = /^[a-zA-Z0-9-]+$/;
+/** Step 6 scenario ids are slugs; same crafted-URL guard as project ids. */
+const SCENARIO_ID_REGEX = /^[a-zA-Z0-9_-]+$/;
 
 const SUGGESTIONS: { intent: Intent; send: string; title: string; sub: string }[] = [
   {
@@ -74,7 +90,7 @@ const SUGGESTIONS: { intent: Intent; send: string; title: string; sub: string }[
     intent: "feedback",
     send: "I’ve got feedback on this flow",
     title: "I’ve got feedback on this flow",
-    sub: "Lands on the PM Hub Auto-improve board",
+    sub: "Lands on the Parallel Auto-improve board",
   },
 ];
 
@@ -129,17 +145,21 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
   const [triageSession, setTriageSession] = useState<TriageSession | null>(null);
 
   // The project the assistant acts on behalf of. Resolution order:
-  // `?pmhub_qa_project=` URL param (PM Hub's QA "Open test URL" links carry
+  // `?pmhub_qa_project=` URL param (Parallel's QA "Open test URL" links carry
   // it) → sessionStorage (sticky across in-session navigation) → the
   // NEXT_PUBLIC_PMHUB_PROJECT_ID env default passed as the projectId prop.
   // When all three are empty the panel opens with a project picker fed by
-  // PM Hub's /api/embed/projects.
+  // Parallel's /api/embed/projects.
   const [boundId, setBoundId] = useState<string | null>(null);
   const [pickingProject, setPickingProject] = useState(false);
 
   const idRef = useRef(0);
   const chatRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // Guards the `?pmhub_qa_scenario=` auto-open so it fires once per page
+  // load (also covers StrictMode's double effect run). Minimizing the
+  // panel afterwards stays minimized — no re-nagging.
+  const autoOpenedRef = useRef(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -149,7 +169,34 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
     const fromUrl = params.get("pmhub_qa_project");
     const valid = fromUrl && PROJECT_BIND_REGEX.test(fromUrl) ? fromUrl : null;
     if (valid) window.sessionStorage.setItem(PROJECT_BIND_KEY, valid);
-    setBoundId(valid ?? window.sessionStorage.getItem(PROJECT_BIND_KEY) ?? projectId);
+    const resolved = valid ?? window.sessionStorage.getItem(PROJECT_BIND_KEY) ?? projectId;
+    setBoundId(resolved);
+
+    // Deep link from Parallel's Step 6 "Open test URL": auto-open the
+    // panel straight into that scenario's walkthrough. Requires a bound
+    // project (the QA links always carry both params); the scenario is a
+    // one-shot — it's deliberately NOT persisted to sessionStorage.
+    const rawScenario = params.get("pmhub_qa_scenario");
+    const scenarioId = rawScenario && SCENARIO_ID_REGEX.test(rawScenario) ? rawScenario : null;
+    if (scenarioId && resolved && !autoOpenedRef.current) {
+      autoOpenedRef.current = true;
+      setOpen(true);
+      setMsgs((m) =>
+        m.length > 0
+          ? m
+          : [
+              {
+                id: (idRef.current += 1),
+                role: "bot",
+                intent: "testrun",
+                el: null,
+                text: "Walk this test case",
+                route: window.location.pathname,
+                scenarioId,
+              },
+            ]
+      );
+    }
   }, [projectId]);
 
   function bindProject(id: string) {
@@ -265,7 +312,7 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
       {!open && (
         <button
           type="button"
-          aria-label="Open PM Hub assistant"
+          aria-label="Open Parallel assistant"
           data-testid="pmhub-assistant.bubble"
           onClick={openPanel}
           className="pmha-bubble pmha-grad">
@@ -283,7 +330,7 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
             </span>
             <div className="pmha-htxt">
               <div className="pmha-title">
-                PM Hub Assistant <span className="pmha-live" aria-hidden />
+                Parallel Assistant <span className="pmha-live" aria-hidden />
               </div>
               <div className="pmha-meta">
                 {route || "/"}
@@ -325,7 +372,7 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
             {showEmpty && !boundId && (
               <div className="pmha-msg">
                 <div className="pmha-hello">
-                  Hi — I’m the <b>PM Hub assistant</b>. First, which project is this session about? Everything
+                  Hi — I’m the <b>Parallel assistant</b>. First, which project is this session about? Everything
                   you report or test here files into it.
                 </div>
                 <ProjectPicker current={null} onPick={bindProject} />
@@ -335,7 +382,7 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
             {showEmpty && boundId && (
               <div className="pmha-msg">
                 <div className="pmha-hello">
-                  Hi — I’m the <b>PM Hub assistant</b>. Tell me what’s up in your own words and I’ll work out
+                  Hi — I’m the <b>Parallel assistant</b>. Tell me what’s up in your own words and I’ll work out
                   whether it’s a <b>test</b>, a <b>question</b>, or <b>feedback</b>.
                 </div>
                 <div className="pmha-suglabel">Try one of these</div>
@@ -376,6 +423,7 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
                   text={m.text}
                   route={m.route}
                   projectId={boundId}
+                  scenarioId={m.scenarioId ?? null}
                   onReclassify={() => reclassify(m.id)}
                   onFlag={setTriageSession}
                   scrollToBottom={scrollToBottom}
@@ -482,6 +530,7 @@ function BotMessage({
   text,
   route,
   projectId,
+  scenarioId,
   onReclassify,
   onFlag,
   scrollToBottom,
@@ -491,6 +540,8 @@ function BotMessage({
   text: string;
   route: string;
   projectId: string | null;
+  /** Deep-linked scenario (from `?pmhub_qa_scenario=`) — seeded, not classified from typed text. */
+  scenarioId?: string | null;
   onReclassify: () => void;
   onFlag: (session: TriageSession) => void;
   scrollToBottom: () => void;
@@ -509,14 +560,25 @@ function BotMessage({
         <span className="pmha-pill">
           {meta.icon(12)} {meta.label}
         </span>
-        <span>detected</span> ·{" "}
-        <button type="button" className="pmha-link" onClick={onReclassify}>
-          not this?
-        </button>
+        {scenarioId ? (
+          <span>linked from Parallel</span>
+        ) : (
+          <>
+            <span>detected</span> ·{" "}
+            <button type="button" className="pmha-link" onClick={onReclassify}>
+              not this?
+            </button>
+          </>
+        )}
       </div>
 
       {intent === "testrun" && (
-        <TestRunner projectId={projectId} onFlag={onFlag} scrollToBottom={scrollToBottom} />
+        <TestRunner
+          projectId={projectId}
+          initialScenarioId={scenarioId ?? null}
+          onFlag={onFlag}
+          scrollToBottom={scrollToBottom}
+        />
       )}
 
       {intent === "bug" && (
@@ -808,7 +870,7 @@ function BugBody({
     ranRef.current = true;
     if (!projectId) {
       setError(
-        "No PM Hub project is connected to this page, so I can’t file a ticket. Ask your PM to bind one."
+        "No Parallel project is connected to this page, so I can’t file a ticket. Ask your PM to bind one."
       );
       setPhase("error");
       return;
@@ -993,7 +1055,7 @@ function ProjectPicker({
       </div>
     );
   }
-  if (projects.length === 0) return <div className="pmha-bub">No active PM Hub projects found.</div>;
+  if (projects.length === 0) return <div className="pmha-bub">No active Parallel projects found.</div>;
 
   return (
     <div className="pmha-bub">
@@ -1029,10 +1091,13 @@ type ScenariosResponse = {
 
 function TestRunner({
   projectId,
+  initialScenarioId,
   onFlag,
   scrollToBottom,
 }: {
   projectId: string | null;
+  /** Preselect this scenario after the plan loads (QA deep link). */
+  initialScenarioId?: string | null;
   onFlag: (session: TriageSession) => void;
   scrollToBottom: () => void;
 }) {
@@ -1040,13 +1105,16 @@ function TestRunner({
   const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
   const [pickedId, setPickedId] = useState<string | null>(null);
+  // The deep link named a scenario that isn't in the loaded plan (stale
+  // link after a re-generated test plan) — fall back to the picker, noted.
+  const [linkedMissing, setLinkedMissing] = useState(false);
   const ranRef = useRef(false);
 
   useEffect(() => {
     if (ranRef.current) return;
     ranRef.current = true;
     if (!projectId) {
-      setError("No PM Hub project is connected to this page. Ask your PM to bind one to run its test plan.");
+      setError("No Parallel project is connected to this page. Ask your PM to bind one to run its test plan.");
       setPhase("error");
       return;
     }
@@ -1054,7 +1122,21 @@ function TestRunner({
       const res = await pmhubGet<ScenariosResponse>("scenarios", { projectId });
       if (res.ok) {
         setData(res.data);
-        if (res.data.scenarios.length === 1) setPickedId(res.data.scenarios[0].id);
+        const linked =
+          initialScenarioId && res.data.scenarios.some((s) => s.id === initialScenarioId)
+            ? initialScenarioId
+            : null;
+        if (linked) {
+          setPickedId(linked);
+        } else if (initialScenarioId) {
+          // Stale deep link (plan re-generated since the PM's link) —
+          // force the picker + hint instead of silently auto-walking a
+          // scenario the link never named (the seeded card still says
+          // "linked from Parallel", so an auto-pick would mislead).
+          setLinkedMissing(true);
+        } else if (res.data.scenarios.length === 1) {
+          setPickedId(res.data.scenarios[0].id);
+        }
         setPhase("ready");
       } else {
         setError(res.error);
@@ -1062,7 +1144,7 @@ function TestRunner({
       }
       scrollToBottom();
     })();
-  }, [projectId, scrollToBottom]);
+  }, [projectId, initialScenarioId, scrollToBottom]);
 
   if (phase === "loading") {
     return (
@@ -1096,6 +1178,11 @@ function TestRunner({
     // Multiple scenarios → let the tester pick which one to walk.
     return (
       <div className="pmha-bub">
+        {linkedMissing && (
+          <div className="pmha-hint" style={{ marginBottom: 8 }}>
+            The linked test case isn’t in this project’s current plan — it may have been re-generated.
+          </div>
+        )}
         Pick a scenario to walk:
         <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
           {data.scenarios.map((s) => (

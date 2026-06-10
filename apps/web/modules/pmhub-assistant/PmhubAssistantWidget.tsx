@@ -52,6 +52,11 @@ const INTENT: Record<Intent, { label: string; icon: (size: number) => JSX.Elemen
 
 const INTENT_ORDER: Intent[] = ["testrun", "bug", "ask", "feedback"];
 
+/** sessionStorage key for the project the assistant is bound to. */
+const PROJECT_BIND_KEY = "pmhub-assistant.project";
+/** Same id shape the preview overlay enforces — keeps crafted URLs out. */
+const PROJECT_BIND_REGEX = /^[a-zA-Z0-9-]+$/;
+
 const SUGGESTIONS: { intent: Intent; send: string; title: string; sub: string }[] = [
   {
     intent: "bug",
@@ -123,6 +128,15 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
   const [pendingEl, setPendingEl] = useState<PickedElement | null>(null);
   const [triageSession, setTriageSession] = useState<TriageSession | null>(null);
 
+  // The project the assistant acts on behalf of. Resolution order:
+  // `?pmhub_qa_project=` URL param (PM Hub's QA "Open test URL" links carry
+  // it) → sessionStorage (sticky across in-session navigation) → the
+  // NEXT_PUBLIC_PMHUB_PROJECT_ID env default passed as the projectId prop.
+  // When all three are empty the panel opens with a project picker fed by
+  // PM Hub's /api/embed/projects.
+  const [boundId, setBoundId] = useState<string | null>(null);
+  const [pickingProject, setPickingProject] = useState(false);
+
   const idRef = useRef(0);
   const chatRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -132,7 +146,21 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
     const params = new URLSearchParams(window.location.search);
     setHiddenForOverlay(params.has("pmhub_project_id"));
     setRoute(window.location.pathname);
-  }, []);
+    const fromUrl = params.get("pmhub_qa_project");
+    const valid = fromUrl && PROJECT_BIND_REGEX.test(fromUrl) ? fromUrl : null;
+    if (valid) window.sessionStorage.setItem(PROJECT_BIND_KEY, valid);
+    setBoundId(valid ?? window.sessionStorage.getItem(PROJECT_BIND_KEY) ?? projectId);
+  }, [projectId]);
+
+  function bindProject(id: string) {
+    window.sessionStorage.setItem(PROJECT_BIND_KEY, id);
+    // A thread is project-scoped. Already-rendered flows (TestRunner,
+    // triage) fetch once per mount, so they'd silently keep acting on the
+    // previous project — reset the thread instead of leaving stale cards.
+    if (boundId && id !== boundId) resetChat();
+    setBoundId(id);
+    setPickingProject(false);
+  }
 
   const scrollToBottom = useCallback(() => {
     const c = chatRef.current;
@@ -178,6 +206,11 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
   function sendText(text: string) {
     const trimmed = text.trim();
     if (!trimmed) return;
+    if (!boundId) {
+      // Every flow files into a project — ask for one before routing.
+      setPickingProject(true);
+      return;
+    }
     const el = pendingEl;
     setMsgs((m) => [...m, { id: nextId(), role: "user", text: trimmed, el }]);
     setPendingEl(null);
@@ -192,6 +225,10 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
 
   function launchTestCase() {
     if (!open) openPanel();
+    if (!boundId) {
+      setPickingProject(true);
+      return;
+    }
     pushBot("testrun", null, "Run a test case");
   }
 
@@ -250,7 +287,15 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
               </div>
               <div className="pmha-meta">
                 {route || "/"}
-                {projectId ? ` · ${projectId}` : " · no project bound"}
+                {" · "}
+                <button
+                  type="button"
+                  className="pmha-projsw"
+                  title={boundId ? "Switch project" : "Pick a project"}
+                  data-testid="pmhub-assistant.project-switch"
+                  onClick={() => setPickingProject((v) => !v)}>
+                  {boundId ?? "pick a project"}
+                </button>
               </div>
             </div>
             <button
@@ -277,7 +322,17 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
             <div className={`pmha-track${triageSession ? " pmha-track-triage" : ""}`}>
               <div className="pmha-pane">
           <div className="pmha-chat" ref={chatRef}>
-            {showEmpty && (
+            {showEmpty && !boundId && (
+              <div className="pmha-msg">
+                <div className="pmha-hello">
+                  Hi — I’m the <b>PM Hub assistant</b>. First, which project is this session about? Everything
+                  you report or test here files into it.
+                </div>
+                <ProjectPicker current={null} onPick={bindProject} />
+              </div>
+            )}
+
+            {showEmpty && boundId && (
               <div className="pmha-msg">
                 <div className="pmha-hello">
                   Hi — I’m the <b>PM Hub assistant</b>. Tell me what’s up in your own words and I’ll work out
@@ -320,12 +375,18 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
                   el={m.el}
                   text={m.text}
                   route={m.route}
-                  projectId={projectId}
+                  projectId={boundId}
                   onReclassify={() => reclassify(m.id)}
                   onFlag={setTriageSession}
                   scrollToBottom={scrollToBottom}
                 />
               )
+            )}
+
+            {pickingProject && (boundId || !showEmpty) && (
+              <div className="pmha-msg">
+                <ProjectPicker current={boundId} onPick={bindProject} scrollToBottom={scrollToBottom} />
+              </div>
             )}
 
             {typing && (
@@ -361,7 +422,7 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
                 rows={1}
                 className="pmha-input"
                 data-testid="pmhub-assistant.input"
-                placeholder="Run a test, ask why, or share feedback…"
+                placeholder={boundId ? "Run a test, ask why, or share feedback…" : "Pick a project to get started…"}
                 value={input}
                 onChange={(e) => {
                   setInput(e.target.value);
@@ -379,7 +440,7 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
                 aria-label="Send"
                 data-testid="pmhub-assistant.send"
                 className="pmha-sendbtn pmha-grad"
-                disabled={!input.trim()}
+                disabled={!input.trim() || !boundId}
                 onClick={() => sendText(input)}>
                 <IconSend size={16} />
               </button>
@@ -885,6 +946,78 @@ type EmbedScenario = {
   edge_cases: string[];
   execution: { result: string; triage_status: string | null; has_proposal: boolean } | null;
 };
+
+/* ----------------------------- project picker ---------------------------- */
+
+type ProjectsResponse = {
+  projects: { id: string; title: string; state: string }[];
+};
+
+/**
+ * Lets the tester bind the assistant to a PM Hub project when the page URL
+ * didn't carry `?pmhub_qa_project=` and no env default is configured — or
+ * switch projects mid-session via the header affordance. Fed by PM Hub's
+ * /api/embed/projects (in-QA projects sort first).
+ */
+function ProjectPicker({
+  current,
+  onPick,
+  scrollToBottom,
+}: {
+  current: string | null;
+  onPick: (id: string) => void;
+  scrollToBottom?: () => void;
+}) {
+  const [projects, setProjects] = useState<ProjectsResponse["projects"] | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      const res = await pmhubGet<ProjectsResponse>("projects");
+      if (res.ok) setProjects(res.data.projects);
+      else setError(res.error);
+      scrollToBottom?.();
+    })();
+  }, [scrollToBottom]);
+
+  if (error) return <div className="pmha-bub">I couldn’t load the project list: {error}</div>;
+  if (!projects) {
+    return (
+      <div className="pmha-bub">
+        Loading projects…
+        <div className="pmha-typing" style={{ marginTop: 8 }}>
+          <span />
+          <span />
+          <span />
+        </div>
+      </div>
+    );
+  }
+  if (projects.length === 0) return <div className="pmha-bub">No active PM Hub projects found.</div>;
+
+  return (
+    <div className="pmha-bub">
+      {current ? "Switch to another project:" : "Pick the project to work on:"}
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+        {projects.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            className="pmha-btn"
+            style={{ textAlign: "left" }}
+            data-testid={`pmhub-assistant.project-${p.id}`}
+            onClick={() => onPick(p.id)}>
+            {p.title}{" "}
+            <small style={{ opacity: 0.65 }}>
+              · {p.state}
+              {p.id === current ? " · current" : ""}
+            </small>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 type ScenariosResponse = {
   title: string;
@@ -1503,6 +1636,9 @@ function WidgetStyles() {
         box-shadow:0 0 0 3px color-mix(in srgb,var(--green) 18%,transparent)}
       .pmha-meta{font-size:11px;color:var(--sub);font-family:var(--mono),ui-monospace,monospace;margin-top:2px;
         white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .pmha-projsw{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;
+        text-decoration:underline dotted;text-underline-offset:2px}
+      .pmha-projsw:hover{color:var(--emph)}
       .pmha-icbtn{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;color:var(--sub);
         border:none;background:transparent;cursor:pointer}
       .pmha-icbtn:hover{background:var(--subtle);color:var(--emph)}

@@ -1,9 +1,33 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
 
 import { startElementPick, type PickedElement } from "./lib/elementPick";
 import { pmhubGet, pmhubPost } from "./lib/pmhubClient";
+
+/**
+ * Document Picture-in-Picture is Chromium-only and not yet typed in lib.dom.
+ * Declare the small surface we use locally (same shape PM Hub's QA pop-out uses).
+ */
+declare global {
+  interface Window {
+    documentPictureInPicture?: {
+      requestWindow(opts?: {
+        width?: number;
+        height?: number;
+        disallowReturnToOpener?: boolean;
+      }): Promise<Window>;
+    };
+  }
+}
 
 /**
  * Native Parallel assistant widget for cal.diy ("Parallel Assistant";
@@ -65,6 +89,20 @@ const INTENT: Record<Intent, { label: string; icon: (size: number) => JSX.Elemen
 };
 
 const INTENT_ORDER: Intent[] = ["testrun", "bug", "ask", "feedback"];
+
+/** In-page panel drag-to-resize bounds (px). No persistence — resets on reload. */
+const PANEL_MIN_W = 320;
+const PANEL_MIN_H = 420;
+const PANEL_MAX_W = 720;
+
+/**
+ * How the "open in another page" button detaches the panel:
+ *  - "window" → a normal resizable browser window (Gmail-compose pop-out style).
+ *  - "pip"    → an always-on-top Document Picture-in-Picture floating window
+ *               (YouTube mini-player style; Chromium-only, window.open fallback).
+ * Both keep the live chat in sync (the panel is portaled into the new window).
+ */
+const POPOUT_STYLE: "window" | "pip" = "pip";
 
 /** sessionStorage key for the project the assistant is bound to. */
 const PROJECT_BIND_KEY = "pmhub-assistant.project";
@@ -144,6 +182,25 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
   const [pendingEl, setPendingEl] = useState<PickedElement | null>(null);
   const [triageSession, setTriageSession] = useState<TriageSession | null>(null);
 
+  // --- floating-window (Document PiP / popup) state ---
+  // null = rendered in-page; a Window = popped out into a floating window.
+  const [popWindow, setPopWindow] = useState<Window | null>(null);
+  const [pipSupported, setPipSupported] = useState(false);
+
+  // --- drag-to-move (in-page) ---
+  // null until the first drag, then inline {left,top}px overriding bottom/right.
+  const [dragPos, setDragPos] = useState<{ left: number; top: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const dragStartRef = useRef({ pointerX: 0, pointerY: 0, left: 0, top: 0 });
+
+  // --- drag-to-resize (in-page) ---
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  const [resizing, setResizing] = useState(false);
+  const resizeStartRef = useRef({ pointerX: 0, pointerY: 0, w: 0, h: 0 });
+
+  const panelRef = useRef<HTMLDivElement>(null);
+  const poppedOut = popWindow !== null;
+
   // The project the assistant acts on behalf of. Resolution order:
   // `?pmhub_qa_project=` URL param (Parallel's QA "Open test URL" links carry
   // it) → sessionStorage (sticky across in-session navigation) → the
@@ -171,6 +228,7 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
     const params = new URLSearchParams(window.location.search);
     setHiddenForOverlay(params.has("pmhub_project_id"));
     setRoute(window.location.pathname);
+    setPipSupported(!!window.documentPictureInPicture);
     const fromUrl = params.get("pmhub_qa_project");
     const valid = fromUrl && PROJECT_BIND_REGEX.test(fromUrl) ? fromUrl : null;
     if (valid) window.sessionStorage.setItem(PROJECT_BIND_KEY, valid);
@@ -239,6 +297,70 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
     if (pinTopRef.current) scrollToTop();
     else scrollToBottom();
   }, [msgs, typing, scrollToBottom, scrollToTop]);
+
+  // Drag-to-move: document-level pointer tracking so a fast drag that leaves
+  // the header doesn't drop the gesture. Clamps the panel inside the viewport.
+  useEffect(() => {
+    if (!dragging) return;
+    const panel = panelRef.current;
+    const w = panel?.offsetWidth ?? 392;
+    const h = panel?.offsetHeight ?? 640;
+    const margin = 8;
+    function move(ev: PointerEvent) {
+      const s = dragStartRef.current;
+      const nextLeft = s.left + (ev.clientX - s.pointerX);
+      const nextTop = s.top + (ev.clientY - s.pointerY);
+      const maxLeft = Math.max(margin, window.innerWidth - w - margin);
+      const maxTop = Math.max(margin, window.innerHeight - h - margin);
+      setDragPos({
+        left: Math.min(Math.max(margin, nextLeft), maxLeft),
+        top: Math.min(Math.max(margin, nextTop), maxTop),
+      });
+    }
+    function up() {
+      setDragging(false);
+    }
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
+    document.body.style.userSelect = "none";
+    return () => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+      document.body.style.userSelect = "";
+    };
+  }, [dragging]);
+
+  // Drag-to-resize: same document-listener idiom; clamp to min/max + viewport.
+  useEffect(() => {
+    if (!resizing) return;
+    function move(ev: PointerEvent) {
+      const s = resizeStartRef.current;
+      const maxH = window.innerHeight - 40;
+      setSize({
+        w: Math.min(Math.max(PANEL_MIN_W, s.w + (ev.clientX - s.pointerX)), PANEL_MAX_W),
+        h: Math.min(Math.max(PANEL_MIN_H, s.h + (ev.clientY - s.pointerY)), maxH),
+      });
+    }
+    function up() {
+      setResizing(false);
+    }
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
+    document.body.style.userSelect = "none";
+    return () => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+      document.body.style.userSelect = "";
+    };
+  }, [resizing]);
+
+  // Close any floating window if the widget unmounts (e.g. route change) so it
+  // doesn't linger orphaned. The cleanup closes the *previous* popWindow value.
+  useEffect(() => {
+    return () => {
+      if (popWindow && !popWindow.closed) popWindow.close();
+    };
+  }, [popWindow]);
 
   if (!enabled || hiddenForOverlay) return null;
 
@@ -326,13 +448,92 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
     });
   }
 
+  function onHeadPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
+    if (poppedOut) return; // header drag is meaningless in the floating window
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest("button")) return; // let header icon buttons click
+    const panel = panelRef.current;
+    if (!panel) return;
+    const rect = panel.getBoundingClientRect();
+    dragStartRef.current = { pointerX: e.clientX, pointerY: e.clientY, left: rect.left, top: rect.top };
+    setDragPos({ left: rect.left, top: rect.top }); // pin to inline left/top (no jump — same rect)
+    setDragging(true);
+  }
+
+  function onResizePointerDown(e: ReactPointerEvent<HTMLDivElement>) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const panel = panelRef.current;
+    if (!panel) return;
+    const rect = panel.getBoundingClientRect();
+    // Pin the top-left to the current rect so the bottom-right grip grows
+    // toward the cursor (otherwise a still-bottom-right-anchored panel would
+    // expand up-left and the grip wouldn't follow). No-op if already dragged.
+    setDragPos({ left: rect.left, top: rect.top });
+    resizeStartRef.current = { pointerX: e.clientX, pointerY: e.clientY, w: rect.width, h: rect.height };
+    setSize({ w: rect.width, h: rect.height });
+    setResizing(true);
+  }
+
+  function preparePopoutDoc(win: Window) {
+    win.document.title = "Parallel Assistant";
+    const b = win.document.body;
+    b.style.margin = "0";
+    b.style.height = "100vh";
+    b.style.overflow = "hidden";
+    // The widget's only external CSS dependency is the ancestor `.dark` class.
+    if (document.documentElement.classList.contains("dark")) {
+      win.document.documentElement.classList.add("dark");
+    }
+  }
+
+  async function openPopout() {
+    if (typeof window === "undefined") return;
+    const w = 420;
+    const h = 680;
+    if (POPOUT_STYLE === "pip" && window.documentPictureInPicture) {
+      try {
+        const pip = await window.documentPictureInPicture.requestWindow({ width: w, height: h });
+        preparePopoutDoc(pip);
+        pip.addEventListener("pagehide", () => setPopWindow(null), { once: true });
+        setOpen(true);
+        setPopWindow(pip);
+        return;
+      } catch {
+        /* fall through to a normal window */
+      }
+    }
+    // Normal resizable browser window (Gmail-compose-style pop-out).
+    const win = window.open("", "pmhub-assistant", `popup,width=${w},height=${h}`);
+    if (!win) return; // popup blocked — stay in-page
+    preparePopoutDoc(win);
+    win.addEventListener("pagehide", () => setPopWindow(null), { once: true });
+    setOpen(true);
+    setPopWindow(win);
+  }
+
+  function bringBack() {
+    if (popWindow && !popWindow.closed) popWindow.close(); // fires pagehide → setPopWindow(null)
+    else setPopWindow(null);
+  }
+
+  // Renders the panel in-page, or portals it into the floating window when popped
+  // out. The portal wraps the panel in `.pmha-root` so the widget's scoped CSS
+  // variables + base font (all defined on `.pmha-root`) cascade in the new
+  // document — without this wrapper the popout renders as unstyled black-on-white.
+  function pmhaPortal(node: ReactNode) {
+    if (!poppedOut || !popWindow) return node;
+    return createPortal(<div className="pmha-root pmha-root--pip">{node}</div>, popWindow.document.body);
+  }
+
   const showEmpty = msgs.length === 0 && !typing;
 
   return (
     <div className="pmha-root" data-testid="pmhub-assistant.root" style={{ display: picking ? "none" : undefined }}>
       <WidgetStyles />
 
-      {!open && (
+      {!open && !poppedOut && (
         <button
           type="button"
           aria-label="Open Parallel assistant"
@@ -343,11 +544,24 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
         </button>
       )}
 
-      {open && (
-        <div className="pmha-panel" data-testid="pmhub-assistant.panel">
-          <div className="pmha-thread pmha-grad" />
+      {(open || poppedOut) &&
+        pmhaPortal(
+          <div
+            ref={panelRef}
+            className={`pmha-panel${poppedOut ? " pmha-panel--pip" : ""}`}
+            data-testid="pmhub-assistant.panel"
+            style={
+              poppedOut
+                ? undefined
+                : {
+                    ...(dragPos ? { left: dragPos.left, top: dragPos.top, right: "auto", bottom: "auto" } : null),
+                    ...(size ? { width: size.w, height: size.h } : null),
+                  }
+            }>
+            <WidgetStyles />
+            <div className="pmha-thread pmha-grad" />
 
-          <header className="pmha-head">
+          <header className="pmha-head" onPointerDown={onHeadPointerDown}>
             <span className="pmha-orb pmha-grad">
               <span className="pmha-pac pmha-pac-sm" aria-hidden />
             </span>
@@ -370,6 +584,15 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
             </div>
             <button
               type="button"
+              title={poppedOut ? "Bring back in-page" : "Open in another page"}
+              aria-label={poppedOut ? "Bring back in-page" : "Open in another page"}
+              data-testid="pmhub-assistant.popout"
+              onClick={poppedOut ? bringBack : openPopout}
+              className="pmha-icbtn">
+              {poppedOut ? <IconBringBack size={15} /> : <IconExternal size={15} />}
+            </button>
+            <button
+              type="button"
               title="New chat"
               aria-label="New chat"
               data-testid="pmhub-assistant.new-chat"
@@ -377,15 +600,17 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
               className="pmha-icbtn">
               <IconPlus size={15} />
             </button>
-            <button
-              type="button"
-              title="Minimize"
-              aria-label="Minimize"
-              data-testid="pmhub-assistant.minimize"
-              onClick={() => setOpen(false)}
-              className="pmha-icbtn">
-              <IconChevronDown size={15} />
-            </button>
+            {!poppedOut && (
+              <button
+                type="button"
+                title="Minimize"
+                aria-label="Minimize"
+                data-testid="pmhub-assistant.minimize"
+                onClick={() => setOpen(false)}
+                className="pmha-icbtn">
+                <IconChevronDown size={15} />
+              </button>
+            )}
           </header>
 
           <div className="pmha-slider">
@@ -526,7 +751,13 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
                 <IconTest size={13} />
                 Run a test case
               </button>
-              <button type="button" className="pmha-pe" data-testid="pmhub-assistant.point-element" onClick={startPick}>
+              <button
+                type="button"
+                className="pmha-pe"
+                data-testid="pmhub-assistant.point-element"
+                onClick={startPick}
+                disabled={poppedOut}
+                title={poppedOut ? "Bring the assistant back in-page to point at an element" : undefined}>
                 <IconCrosshair size={13} />
                 Point at an element
               </button>
@@ -540,7 +771,28 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
               </div>
             </div>
           </div>
-        </div>
+
+            {!poppedOut && (
+              <div
+                className="pmha-resize"
+                data-testid="pmhub-assistant.resize"
+                onPointerDown={onResizePointerDown}
+                aria-hidden
+              />
+            )}
+        </div>,
+        )}
+
+      {poppedOut && (
+        <button
+          type="button"
+          className="pmha-chip pmha-grad"
+          data-testid="pmhub-assistant.bring-back"
+          onClick={bringBack}
+          title="Bring the assistant back into this page">
+          <span className="pmha-pac pmha-pac-sm" aria-hidden />
+          Assistant is in a floating window · Bring back
+        </button>
       )}
     </div>
   );
@@ -1699,6 +1951,36 @@ function IconCopy({ size = 16 }: IconProps) {
   );
 }
 
+function IconExternal({ size = 16 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M14 4h6v6M20 4l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M18 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconBringBack({ size = 16 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="M20 10h-6V4M14 10l7-7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 /* --------------------------------- styles --------------------------------- */
 
 function WidgetStyles() {
@@ -1746,8 +2028,27 @@ function WidgetStyles() {
         height:min(640px,88vh);display:flex;flex-direction:column;background:var(--card);border:1px solid var(--hair);
         border-radius:18px;overflow:hidden;box-shadow:var(--shadow);color:var(--def);
         font-size:13px;line-height:1.5}
+      /* popped-out into a floating window: fill it edge-to-edge */
+      .pmha-root--pip{height:100%;width:100%}
+      .pmha-panel--pip{position:static;inset:auto;width:100%;max-width:none;height:100%;
+        border:none;border-radius:0;box-shadow:none}
       .pmha-thread{height:3px;flex:0 0 auto}
-      .pmha-head{display:flex;align-items:center;gap:11px;padding:13px 14px;border-bottom:1px solid var(--hair)}
+      .pmha-head{display:flex;align-items:center;gap:11px;padding:13px 14px;border-bottom:1px solid var(--hair);
+        cursor:grab;user-select:none}
+      .pmha-head:active{cursor:grabbing}
+      .pmha-head button{cursor:pointer}
+      .pmha-panel--pip .pmha-head{cursor:default}
+      /* drag-to-resize grip, bottom-right corner (in-page only) */
+      .pmha-resize{position:absolute;right:3px;bottom:3px;width:16px;height:16px;z-index:1;
+        cursor:nwse-resize;touch-action:none;opacity:.5;
+        background:linear-gradient(135deg,transparent 0 46%,var(--sub) 46% 54%,transparent 54% 62%,var(--sub) 62% 70%,transparent 70%)}
+      .pmha-resize:hover{opacity:.95}
+      /* in-page chip shown while the assistant is popped out */
+      .pmha-chip{position:fixed;bottom:22px;right:22px;z-index:var(--z);display:inline-flex;align-items:center;gap:9px;
+        max-width:calc(100vw - 44px);border:none;cursor:pointer;color:#fff;border-radius:999px;
+        padding:9px 16px 9px 11px;font:inherit;font-size:12px;font-weight:550;letter-spacing:-.01em;
+        box-shadow:0 8px 22px -6px rgba(91,141,239,.55), inset 0 1px 0 rgba(255,255,255,.35);transition:transform .18s ease}
+      .pmha-chip:hover{transform:translateY(-1px)}
       .pmha-orb{width:28px;height:28px;border-radius:9px;display:grid;place-items:center;flex:0 0 auto;
         box-shadow:inset 0 1px 0 rgba(255,255,255,.3)}
       .pmha-htxt{min-width:0;flex:1}
@@ -1895,6 +2196,8 @@ function WidgetStyles() {
       .pmha-pe{display:inline-flex;align-items:center;gap:7px;font-size:11px;color:var(--sub);border:1px solid var(--hair);
         background:var(--card);border-radius:8px;padding:5px 10px;cursor:pointer}
       .pmha-pe:hover{color:var(--emph);border-color:var(--accent)}
+      .pmha-pe:disabled{opacity:.45;cursor:default}
+      .pmha-pe:disabled:hover{color:var(--sub);border-color:var(--hair)}
 
       @media (prefers-reduced-motion: reduce){
         .pmha-pac{animation:none;clip-path:polygon(50% 50%,100% 33%,100% 0,0 0,0 100%,100% 100%,100% 67%)}

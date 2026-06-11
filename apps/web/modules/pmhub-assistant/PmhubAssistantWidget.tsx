@@ -160,6 +160,11 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
   // load (also covers StrictMode's double effect run). Minimizing the
   // panel afterwards stays minimized — no re-nagging.
   const autoOpenedRef = useRef(false);
+  // While a deep-linked test case is the only thing on screen, keep the
+  // chat pinned to the top (so the tester sees the title + step 01, not
+  // the tail of a tall walkthrough). Cleared the moment the tester sends
+  // their own message, restoring normal bottom-follow.
+  const pinTopRef = useRef(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -180,6 +185,7 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
     const scenarioId = rawScenario && SCENARIO_ID_REGEX.test(rawScenario) ? rawScenario : null;
     if (scenarioId && resolved && !autoOpenedRef.current) {
       autoOpenedRef.current = true;
+      pinTopRef.current = true;
       setOpen(true);
       setMsgs((m) =>
         m.length > 0
@@ -217,9 +223,22 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
     });
   }, []);
 
+  // Deep-link landing: pin the chat to the TOP of the seeded test-case
+  // card (scenario title + step 01) instead of following to the bottom.
+  // A 9-step walkthrough is taller than the panel, so the default
+  // bottom-follow would drop the tester at the last step.
+  const scrollToTop = useCallback(() => {
+    const c = chatRef.current;
+    if (!c) return;
+    requestAnimationFrame(() => {
+      c.scrollTop = 0;
+    });
+  }, []);
+
   useEffect(() => {
-    scrollToBottom();
-  }, [msgs, typing, scrollToBottom]);
+    if (pinTopRef.current) scrollToTop();
+    else scrollToBottom();
+  }, [msgs, typing, scrollToBottom, scrollToTop]);
 
   if (!enabled || hiddenForOverlay) return null;
 
@@ -238,6 +257,7 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
   }
 
   function resetChat() {
+    pinTopRef.current = false;
     setMsgs([]);
     setTyping(false);
     setPendingEl(null);
@@ -258,6 +278,8 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
       setPickingProject(true);
       return;
     }
+    // The tester is driving now — resume normal bottom-follow.
+    pinTopRef.current = false;
     const el = pendingEl;
     setMsgs((m) => [...m, { id: nextId(), role: "user", text: trimmed, el }]);
     setPendingEl(null);
@@ -276,6 +298,7 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
       setPickingProject(true);
       return;
     }
+    pinTopRef.current = false;
     pushBot("testrun", null, "Run a test case");
   }
 
@@ -427,6 +450,7 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
                   onReclassify={() => reclassify(m.id)}
                   onFlag={setTriageSession}
                   scrollToBottom={scrollToBottom}
+                  scrollToTop={scrollToTop}
                 />
               )
             )}
@@ -534,6 +558,7 @@ function BotMessage({
   onReclassify,
   onFlag,
   scrollToBottom,
+  scrollToTop,
 }: {
   intent: Intent;
   el: PickedElement | null;
@@ -545,6 +570,7 @@ function BotMessage({
   onReclassify: () => void;
   onFlag: (session: TriageSession) => void;
   scrollToBottom: () => void;
+  scrollToTop?: () => void;
 }) {
   const meta = INTENT[intent];
   const ref = el ? (
@@ -578,6 +604,7 @@ function BotMessage({
           initialScenarioId={scenarioId ?? null}
           onFlag={onFlag}
           scrollToBottom={scrollToBottom}
+          scrollToTop={scrollToTop}
         />
       )}
 
@@ -1094,12 +1121,15 @@ function TestRunner({
   initialScenarioId,
   onFlag,
   scrollToBottom,
+  scrollToTop,
 }: {
   projectId: string | null;
   /** Preselect this scenario after the plan loads (QA deep link). */
   initialScenarioId?: string | null;
   onFlag: (session: TriageSession) => void;
   scrollToBottom: () => void;
+  /** Deep-link landing: pin to the top of the (tall) card instead of its tail. */
+  scrollToTop?: () => void;
 }) {
   const [data, setData] = useState<ScenariosResponse | null>(null);
   const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
@@ -1142,9 +1172,13 @@ function TestRunner({
         setError(res.error);
         setPhase("error");
       }
-      scrollToBottom();
+      // A deep-linked card is tall (full walkthrough) — land the tester
+      // at its top (title + step 01). Manual "Run a test case" keeps the
+      // normal follow-to-bottom.
+      if (initialScenarioId && scrollToTop) scrollToTop();
+      else scrollToBottom();
     })();
-  }, [projectId, initialScenarioId, scrollToBottom]);
+  }, [projectId, initialScenarioId, scrollToBottom, scrollToTop]);
 
   if (phase === "loading") {
     return (

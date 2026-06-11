@@ -16,7 +16,6 @@ import {
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import "vitest-fetch-mock";
 
-import process from "node:process";
 import { MeetLocationType } from "@calcom/app-store/constants";
 import logger from "@calcom/lib/logger";
 import type { CredentialForCalendarServiceWithEmail } from "@calcom/types/Credential";

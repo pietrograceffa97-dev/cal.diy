@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/triple-slash-reference */
 /// <reference path="../types/ical.d.ts"/>
 
-import process from "node:process";
 import dayjs from "@calcom/dayjs";
 import sanitizeCalendarObject from "@calcom/lib/sanitizeCalendarObject";
 import type {

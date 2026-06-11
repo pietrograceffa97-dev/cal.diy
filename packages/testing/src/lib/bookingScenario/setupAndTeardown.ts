@@ -1,5 +1,4 @@
 import { enableEmailFeature, mockNoTranslations } from "./bookingScenario";
-import process from "node:process";
 import { afterEach, beforeEach } from "vitest";
 
 export function setupAndTeardown() {

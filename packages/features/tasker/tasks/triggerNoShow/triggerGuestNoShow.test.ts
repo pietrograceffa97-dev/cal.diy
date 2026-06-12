@@ -6,7 +6,6 @@ import {
   getScenarioData,
   TestData,
 } from "@calcom/testing/lib/bookingScenario/bookingScenario";
-import process from "node:process";
 import { appStoreMetadata } from "@calcom/app-store/apps.metadata.generated";
 import dayjs from "@calcom/dayjs";
 import { BookingStatus, TimeUnit, WebhookTriggerEvents } from "@calcom/prisma/enums";

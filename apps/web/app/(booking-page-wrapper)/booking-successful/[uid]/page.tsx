@@ -14,9 +14,52 @@ export const metadata = {
   },
 };
 
-export default async function BookingSuccessful({ params }: _PageProps) {
+// Deterministic mock props for the Parallel drafting iframe. Two preview
+// variants exercise the personalized thank-you line: `with-name` shows the
+// name token, `no-name` exercises the graceful fallback copy.
+function getPreviewCardProps(variant: string) {
+  const start = new Date("2026-07-15T15:00:00.000Z");
+  const end = new Date("2026-07-15T15:30:00.000Z");
+  const attendeeName = variant === "no-name" ? null : "Sarah Johnson";
+  return {
+    uid: "preview",
+    title: "30 Minute Meeting",
+    formattedDate: "Wednesday, July 15, 2026",
+    formattedTime: "3:00 PM",
+    endTime: "3:30 PM",
+    formattedTimeZone: "Europe/London",
+    hostName: "Pietro Graceffa",
+    hostEmail: "pietro@example.com",
+    hostAvatarUrl: null,
+    attendeeName,
+    attendeeEmail: "sarah@example.com",
+    additionalInvitees: [],
+    location: "https://app.cal.com/video/preview-room",
+    startTime: start.toISOString(),
+    rawEndTime: end.toISOString(),
+    needsConfirmation: false,
+    confirmationApproverName: "Pietro Graceffa",
+    isCancelled: false,
+    cancellationReason: null,
+    cancelledBy: null,
+  };
+}
+
+export default async function BookingSuccessful({ params, searchParams }: _PageProps) {
   const resolved = await params;
+  const resolvedSearch = await searchParams;
   const uid = typeof resolved.uid === "string" ? resolved.uid : "";
+
+  // Design-preview branch (Parallel drafting iframe only): when a `?variant=`
+  // param is present, render the card with deterministic mock data so the
+  // bracketed `[uid]` route shows a populated confirmation screen without a
+  // real booking lookup (which would 404 via the decoy fallback). Production
+  // booking links never carry `?variant=`, so the real path below is untouched.
+  const previewVariant =
+    typeof resolvedSearch.variant === "string" ? resolvedSearch.variant : null;
+  if (previewVariant) {
+    return <BookingSuccessCard {...getPreviewCardProps(previewVariant)} />;
+  }
 
   if (!uid) {
     return <BookingSuccessDecoyFallback uid="" />;

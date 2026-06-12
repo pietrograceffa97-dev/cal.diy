@@ -121,11 +121,13 @@ export function BookingSuccessCard({
               data-testid={isCancelled ? "cancelled-headline" : undefined}>
               {headline}
             </h1>
-            {!isCancelled && attendeeFirstName && (
+            {!isCancelled && (
               <p
                 className="text-emphasis mt-3 text-base font-medium leading-6"
                 data-testid="booking-success-thankyou">
-                {`Thank you ${attendeeFirstName}, you're the best! 🎉🙌`}
+                {attendeeFirstName
+                  ? `Thank you, ${attendeeFirstName} — you're the best! 🎉`
+                  : `Thank you — you're the best! 🎉`}
               </p>
             )}
             {subtitle && <p className="text-default mt-3 text-sm leading-5">{subtitle}</p>}

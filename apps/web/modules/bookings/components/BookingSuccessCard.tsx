@@ -31,6 +31,9 @@ export interface BookingSuccessCardProps {
   startTime: Date | string;
   rawEndTime: Date | string;
   needsConfirmation?: boolean;
+  // Design-preview only: accent color for the success check badge. "green" is
+  // the production default; "blue" is an alternate explored in the design canvas.
+  successAccent?: "green" | "blue";
   // Name shown in the awaiting-confirmation subtitle. Mirrors the legacy view's
   // `profile.name` (team name for team/collective events, host name otherwise).
   // Falls back to `hostName` if not provided.
@@ -60,6 +63,7 @@ export function BookingSuccessCard({
   startTime,
   rawEndTime,
   needsConfirmation = false,
+  successAccent = "green",
   confirmationApproverName,
   isCancelled = false,
   cancellationReason,
@@ -108,12 +112,19 @@ export function BookingSuccessCard({
             data-cancelled={isCancelled || undefined}>
             <div
               className={`mx-auto flex h-12 w-12 items-center justify-center rounded-full ${
-                isCancelled ? "bg-error" : "bg-cal-success"
+                isCancelled ? "bg-error" : successAccent === "blue" ? "bg-cal-info" : "bg-cal-success"
               }`}>
               {isCancelled ? (
                 <XIcon className="h-5 w-5 text-red-700 dark:text-red-200" aria-hidden="true" />
               ) : (
-                <CheckIcon className="h-5 w-5 text-green-700 dark:text-green-400" aria-hidden="true" />
+                <CheckIcon
+                  className={`h-5 w-5 ${
+                    successAccent === "blue"
+                      ? "text-blue-700 dark:text-blue-400"
+                      : "text-green-700 dark:text-green-400"
+                  }`}
+                  aria-hidden="true"
+                />
               )}
             </div>
             <h1

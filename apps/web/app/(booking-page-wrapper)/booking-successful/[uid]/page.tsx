@@ -21,6 +21,7 @@ function getPreviewCardProps(variant: string) {
   const start = new Date("2026-07-15T15:00:00.000Z");
   const end = new Date("2026-07-15T15:30:00.000Z");
   const attendeeName = variant === "no-name" ? null : "Jonathan Johnson";
+  const successAccent = variant === "blue-check" ? "blue" : "green";
   return {
     uid: "preview",
     title: "30 Minute Meeting",
@@ -40,6 +41,7 @@ function getPreviewCardProps(variant: string) {
     needsConfirmation: false,
     confirmationApproverName: "Pietro Graceffa",
     isCancelled: false,
+    successAccent,
     cancellationReason: null,
     cancelledBy: null,
   };

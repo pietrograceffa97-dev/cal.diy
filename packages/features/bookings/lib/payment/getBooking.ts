@@ -1,4 +1,3 @@
-import process from "node:process";
 import { enrichUserWithDelegationCredentials } from "@calcom/app-store/delegationCredential";
 import { getCalEventResponses } from "@calcom/features/bookings/lib/getCalEventResponses";
 import {

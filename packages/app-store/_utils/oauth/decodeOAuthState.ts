@@ -1,5 +1,4 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import process from "node:process";
 import type { NextApiRequest } from "next";
 import type { IntegrationOAuthCallbackState } from "../../types";
 

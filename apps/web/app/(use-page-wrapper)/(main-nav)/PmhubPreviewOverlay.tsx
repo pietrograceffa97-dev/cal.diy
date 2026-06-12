@@ -67,7 +67,7 @@ export function PmhubPreviewOverlay({
     <div className="flex h-full w-full flex-col">
       <div className="bg-semantic-attention-subtle border-subtle text-default flex items-center justify-between gap-2 border-b px-4 py-1.5 text-xs">
         <span>
-          <span className="font-semibold">Previewing PM Hub prototype</span>{" "}
+          <span className="font-semibold">Previewing Parallel prototype</span>{" "}
           <code className="bg-emphasis text-emphasis ml-1 rounded px-1.5 py-0.5 font-mono text-[10px]">
             {projectId}
           </code>
@@ -81,7 +81,7 @@ export function PmhubPreviewOverlay({
         </button>
       </div>
       <iframe
-        title={`PM Hub prototype preview · ${projectId}`}
+        title={`Parallel prototype preview · ${projectId}`}
         src={iframeSrc}
         sandbox="allow-scripts allow-same-origin allow-forms"
         className="flex-1 w-full border-0 bg-white"

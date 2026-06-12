@@ -1,4 +1,3 @@
-import process from "node:process";
 import { getCalendar } from "@calcom/app-store/_utils/getCalendar";
 import { symmetricDecrypt } from "@calcom/lib/crypto";
 import { decryptSecret } from "@calcom/lib/crypto/keyring";

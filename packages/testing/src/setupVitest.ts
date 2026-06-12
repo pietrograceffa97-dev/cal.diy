@@ -1,4 +1,3 @@
-import process from "node:process";
 import type { CalendarService } from "@calcom/types/Calendar";
 import matchers from "@testing-library/jest-dom/matchers";
 import ResizeObserver from "resize-observer-polyfill";

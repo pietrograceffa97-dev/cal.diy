@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import process from "node:process";
 import { configure } from "@trigger.dev/sdk";
 import { ENABLE_ASYNC_TASKER } from "../constants";
 import { redactError } from "../redactError";

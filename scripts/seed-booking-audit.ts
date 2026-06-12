@@ -1,4 +1,3 @@
-import process from "node:process";
 import { prisma } from "@calcom/prisma";
 import { BookingStatus } from "@calcom/prisma/enums";
 import { v4 as uuidv4 } from "uuid";

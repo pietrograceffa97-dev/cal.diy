@@ -30,7 +30,6 @@ import {
   mockVideoAppToCrashOnCreateMeeting,
   TestData,
 } from "@calcom/testing/lib/bookingScenario/bookingScenario";
-import process from "node:process";
 import { appStoreMetadata } from "@calcom/app-store/appStoreMetaData";
 import { createWatchlistEntry } from "@calcom/features/watchlist/lib/testUtils";
 import { WEBAPP_URL, WEBSITE_URL } from "@calcom/lib/constants";

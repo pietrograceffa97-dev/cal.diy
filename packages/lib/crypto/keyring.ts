@@ -1,5 +1,4 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import process from "node:process";
 
 type KeyringName = "CREDENTIALS";
 

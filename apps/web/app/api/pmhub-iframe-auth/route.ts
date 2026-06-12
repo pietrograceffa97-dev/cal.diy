@@ -155,7 +155,7 @@ export async function GET(req: Request): Promise<NextResponse | Response | never
   //
   // In PM Hub's Railway container these env vars deliberately have
   // different schemes:
-  //   NEXT_PUBLIC_WEBAPP_URL = http://localhost:3010/cal-diy-iframe  (start.sh:123)
+  //   NEXT_PUBLIC_WEBAPP_URL = http://localhost:3010/cal-diy-iframe  (start.sh)
   //     → so cal.diy server-side self-fetches (/api/logo etc.) bypass
   //       PM Hub's Basic Auth gate via loopback
   //   NEXTAUTH_URL = https://pm-agentic-hub-production.up.railway.app/cal-diy-iframe
@@ -166,13 +166,15 @@ export async function GET(req: Request): Promise<NextResponse | Response | never
   // getServerSession actually consults when validating the token on every
   // TRPC request. The setter must speak the reader's language.
   //
-  // History: an earlier fix (commit e75aa044) aligned the setter with (a),
-  // reasoning "match NextAuth's main cookies config." But getServerSession
-  // → getToken doesn't consult that config. Probe (c) of debug session
-  // iframe-webapp-url-conflict on 2026-05-17 confirmed that test requests
-  // with cookie name "__Secure-next-auth.session-token" succeed (200) while
-  // requests with "next-auth.session-token" fail (401), even though the
-  // underlying JWT token is identical in both cases.
+  // History: an earlier fix (commit e75aa044, plus this branch's prior
+  // `ab74e476`) aligned the setter with (a), reasoning "match NextAuth's
+  // main cookies config." But getServerSession → getToken doesn't consult
+  // that config. Probe (c) of debug session iframe-webapp-url-conflict on
+  // 2026-05-17 confirmed that test requests with cookie name
+  // "__Secure-next-auth.session-token" succeed (200) while requests with
+  // "next-auth.session-token" fail (401), even though the underlying JWT
+  // token is identical in both cases. This is the re-applied 2026-05-17
+  // correction (stranded-branch commit 88a61e02) that main never received.
   const useSecureCookies = (process.env.NEXTAUTH_URL ?? "").startsWith(
     "https://",
   );

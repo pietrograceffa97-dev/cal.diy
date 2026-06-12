@@ -1,4 +1,3 @@
-import process from "node:process";
 import logger from "@calcom/lib/logger";
 import { safeStringify } from "@calcom/lib/safeStringify";
 import type { Contact } from "@calcom/types/CrmService";

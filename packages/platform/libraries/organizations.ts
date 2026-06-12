@@ -1,7 +1,6 @@
 // Organizations are not available in community edition
 // Only getBookerBaseUrlSync is kept as it's used for URL generation
 
-import process from "node:process";
 export function getBookerBaseUrlSync(_orgSlug: string | null): string {
   return process.env.NEXT_PUBLIC_WEBAPP_URL || "https://app.cal.com";
 }

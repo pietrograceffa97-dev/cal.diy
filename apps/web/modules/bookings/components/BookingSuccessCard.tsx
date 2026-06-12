@@ -70,9 +70,10 @@ export function BookingSuccessCard({
   const hostDisplayName = hostName ?? t("host");
   const approverName = confirmationApproverName ?? hostName;
 
-  // Friendly first-name greeting for the personalized thank-you line. Falls
-  // back to the full attendee name when there's no whitespace to split on.
-  const attendeeFirstName = attendeeName?.trim().split(/\s+/)[0] ?? null;
+  // Personalized greeting name for the thank-you line — the booker's name as
+  // they entered it, with no title-casing or other normalization (per the PRD).
+  // Whitespace-only names collapse to the non-personalized fallback copy.
+  const greetingName = attendeeName?.trim() || null;
 
   const headline = (() => {
     if (isCancelled) return t("event_cancelled");
@@ -125,9 +126,8 @@ export function BookingSuccessCard({
               <p
                 className="text-emphasis mt-3 text-base font-medium leading-6"
                 data-testid="booking-success-thankyou">
-                {attendeeFirstName
-                  ? `Thank you, ${attendeeFirstName} — you're the best! 🎉`
-                  : `Thank you — you're the best! 🎉`}
+                {greetingName ? `You're the best, ${greetingName}! ` : `You're the best! `}
+                <span aria-hidden="true">🎉</span>
               </p>
             )}
             {subtitle && <p className="text-default mt-3 text-sm leading-5">{subtitle}</p>}

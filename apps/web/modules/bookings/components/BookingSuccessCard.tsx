@@ -70,6 +70,10 @@ export function BookingSuccessCard({
   const hostDisplayName = hostName ?? t("host");
   const approverName = confirmationApproverName ?? hostName;
 
+  // Friendly first-name greeting for the personalized thank-you line. Falls
+  // back to the full attendee name when there's no whitespace to split on.
+  const attendeeFirstName = attendeeName?.trim().split(/\s+/)[0] ?? null;
+
   const headline = (() => {
     if (isCancelled) return t("event_cancelled");
     if (needsConfirmation) return t("booking_submitted");
@@ -117,6 +121,13 @@ export function BookingSuccessCard({
               data-testid={isCancelled ? "cancelled-headline" : undefined}>
               {headline}
             </h1>
+            {!isCancelled && attendeeFirstName && (
+              <p
+                className="text-emphasis mt-3 text-base font-medium leading-6"
+                data-testid="booking-success-thankyou">
+                {`Thank you ${attendeeFirstName}, you're the best! 🎉🙌`}
+              </p>
+            )}
             {subtitle && <p className="text-default mt-3 text-sm leading-5">{subtitle}</p>}
           </header>
 

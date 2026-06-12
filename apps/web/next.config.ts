@@ -254,6 +254,15 @@ const nextConfig = (phase: string): NextConfig => {
     // / Private Network Access policy collisions. Unset on standard
     // cal.diy deployments — `undefined` is the no-op default.
     basePath: process.env.NEXT_PUBLIC_BASE_PATH || undefined,
+    // PM Hub dev-runtime (next dev --webpack behind PMHUB_CAL_DIY_RUNTIME=dev):
+    // Next 16 blocks cross-origin requests to dev resources, and the Parallel
+    // reverse proxy serves this dev server from the public Railway host.
+    // Dev-only option — inert under `next start`/`next build`.
+    allowedDevOrigins: ["pm-agentic-hub-production.up.railway.app"],
+    // Never render the dev-tools indicator: the Drafting view's PDF handoff +
+    // Design Diff screenshots capture this surface, and designer-facing
+    // artifacts must not show dev chrome. Also dev-only.
+    devIndicators: false,
     serverExternalPackages: [
       "deasync",
       "http-cookie-agent",

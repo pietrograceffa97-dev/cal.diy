@@ -1,4 +1,3 @@
-import process from "node:process";
 import { RedisService } from "@calcom/features/redis/RedisService";
 import logger from "@calcom/lib/logger";
 import prisma from "@calcom/prisma";

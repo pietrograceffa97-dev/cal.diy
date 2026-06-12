@@ -1,4 +1,3 @@
-import process from "node:process";
 import { ALL_APPS } from "@calcom/app-store/utils";
 import { getAssignmentReasonCategory } from "@calcom/features/bookings/lib/getAssignmentReasonCategory";
 import { getCalEventResponses } from "@calcom/features/bookings/lib/getCalEventResponses";

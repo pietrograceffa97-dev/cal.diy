@@ -24,7 +24,6 @@ vi.mock("@calcom/lib/i18n", () => ({
   defaultLocaleOption: { value: "en", label: "English" },
 }));
 
-import process from "node:process";
 import { CredentialRepository } from "@calcom/features/credentials/repositories/CredentialRepository";
 import { symmetricDecrypt } from "@calcom/lib/crypto";
 import type { DestinationCalendar } from "@calcom/prisma/client";

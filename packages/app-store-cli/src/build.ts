@@ -1,7 +1,6 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import process from "node:process";
 import { AppMetaSchema, type AppMetaType } from "@calcom/types/AppMetaSchema";
 import chokidar from "chokidar";
 // eslint-disable-next-line no-restricted-imports

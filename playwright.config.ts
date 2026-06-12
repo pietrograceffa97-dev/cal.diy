@@ -1,6 +1,5 @@
 import * as os from "node:os";
 import * as path from "node:path";
-import process from "node:process";
 import { WEBAPP_URL } from "@calcom/lib/constants";
 import type { Frame, PlaywrightTestConfig } from "@playwright/test";
 import { devices, expect } from "@playwright/test";

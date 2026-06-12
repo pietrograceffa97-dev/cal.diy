@@ -7,6 +7,7 @@ import { getServerSession } from "@calcom/features/auth/lib/getServerSession";
 import { buildLegacyRequest } from "@lib/buildLegacyCtx";
 
 import Shell from "~/shell/Shell";
+import PmhubAssistantWidget from "~/pmhub-assistant/PmhubAssistantWidget";
 
 import { PmhubPreviewOverlay } from "./PmhubPreviewOverlay";
 
@@ -21,6 +22,11 @@ const Layout = async ({ children }: { children: React.ReactNode }) => {
     process.env.PMHUB_PUBLIC_URL ??
     "https://pm-agentic-hub-production.up.railway.app";
 
+  // Native PM Hub assistant widget — gated off by default so it only renders on
+  // preview/staging deploys (or local dev) where the flag is set.
+  const assistantEnabled = process.env.NEXT_PUBLIC_ENABLE_PMHUB_ASSISTANT === "1";
+  const assistantProjectId = process.env.NEXT_PUBLIC_PMHUB_PROJECT_ID ?? null;
+
   return (
     <>
       <Shell withoutMain={true}>
@@ -28,6 +34,7 @@ const Layout = async ({ children }: { children: React.ReactNode }) => {
           {children}
         </PmhubPreviewOverlay>
       </Shell>
+      <PmhubAssistantWidget enabled={assistantEnabled} projectId={assistantProjectId} />
     </>
   );
 };

@@ -92,7 +92,6 @@ function expectErrorRedirect(res: Response, path: string, error: string) {
   expect(redirectUrl.searchParams.get("error")).toBe(error);
 }
 
-import process from "node:process";
 // Import after mocks are set up
 import { GET, POST } from "../route";
 

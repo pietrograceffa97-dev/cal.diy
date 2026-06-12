@@ -41,29 +41,37 @@ export const viewport = {
   ],
 };
 
+// basePath prefix: when NEXT_PUBLIC_BASE_PATH is set (e.g.
+// "/cal-diy-iframe" for the PM Hub embed), Next.js does NOT auto-prefix
+// metadata.icons / metadata.manifest. We have to do it manually so the
+// browser resolves these against the cal.diy origin under basePath,
+// not against the parent (PM Hub) origin which 401s them.
+// vercel/next.js#56687, #61487, #18535.
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+
 export const metadata = {
   icons: {
-    icon: "/api/logo?type=favicon-32",
-    apple: "/api/logo?type=apple-touch-icon",
+    icon: `${BASE_PATH}/api/logo?type=favicon-32`,
+    apple: `${BASE_PATH}/api/logo?type=apple-touch-icon`,
     other: [
       {
         rel: "icon-mask",
-        url: "/safari-pinned-tab.svg",
+        url: `${BASE_PATH}/safari-pinned-tab.svg`,
         color: "#000000",
       },
       {
-        url: "/api/logo?type=favicon-16",
+        url: `${BASE_PATH}/api/logo?type=favicon-16`,
         sizes: "16x16",
         type: "image/png",
       },
       {
-        url: "/api/logo?type=favicon-32",
+        url: `${BASE_PATH}/api/logo?type=favicon-32`,
         sizes: "32x32",
         type: "image/png",
       },
     ],
   },
-  manifest: "/site.webmanifest",
+  manifest: `${BASE_PATH}/site.webmanifest`,
   other: {
     "application-TileColor": "#ff0000",
   },

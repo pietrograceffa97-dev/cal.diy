@@ -1,4 +1,3 @@
-import process from "node:process";
 import { DeduplicateJoinsPlugin, Kysely, ParseJSONResultsPlugin, PostgresDialect } from "kysely";
 import { Pool } from "pg";
 import type { Booking, DB } from "./types";

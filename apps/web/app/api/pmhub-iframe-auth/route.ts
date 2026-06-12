@@ -1,7 +1,6 @@
 import crypto from "node:crypto";
 import { encode } from "next-auth/jwt";
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
 import { NextResponse } from "next/server";
 
 import prisma from "@calcom/prisma";
@@ -135,43 +134,86 @@ export async function GET(req: Request): Promise<NextResponse | Response | never
     maxAge: sessionMaxAge,
   });
 
-  // 6. Set the session cookie. Name + options must match
-  // packages/lib/default-cookies.ts (cal.diy already sets
-  // SameSite=None; Secure on HTTPS — iframe-friendly by design).
+  // 6. Set the session cookie. Cookie name + options MUST match what
+  // `getToken()` (called inside `getServerSession`) reads on subsequent
+  // requests — otherwise the page redirects to /auth/login
+  // (X-Frame-Options: DENY) inside the iframe AND every TRPC viewer.me.*
+  // query 401s.
   //
-  // HTTPS detection: prefer the request URL's scheme, fall back to
-  // x-forwarded-proto (Vercel sets this on proxied requests), then to
-  // NEXT_PUBLIC_WEBAPP_URL. The original code read `WEBAPP_URL` (no
-  // NEXT_PUBLIC_ prefix), which isn't set in this scope at runtime —
-  // meaning isHttps was always false, the cookie was named
-  // `next-auth.session-token` (without `__Secure-` prefix) and
-  // sameSite=lax — both wrong for the iframe / production case.
-  // Production cal.diy reads `__Secure-next-auth.session-token` per
-  // packages/lib/default-cookies.ts, so the older code's cookie was
-  // never seen by downstream routes, and `/event-types` redirected
-  // to /auth/login (X-Frame-Options: DENY) inside the iframe.
-  const requestUrl = new URL(req.url);
-  const forwardedProto = req.headers.get("x-forwarded-proto");
-  const webappUrl =
-    process.env.NEXT_PUBLIC_WEBAPP_URL ?? process.env.WEBAPP_URL ?? "";
-  const isHttps =
-    requestUrl.protocol === "https:" ||
-    forwardedProto === "https" ||
-    webappUrl.startsWith("https://");
+  // Subtle gotcha: next-auth has TWO independent cookie-name derivations
+  // and they can disagree:
+  //
+  //   (a) NextAuth's main config at packages/features/auth/lib/next-auth-
+  //       options.ts:408 uses `defaultCookies(WEBAPP_URL.startsWith("https://"))`
+  //       — keyed off NEXT_PUBLIC_WEBAPP_URL (via packages/lib/constants.ts:23).
+  //       This drives the cookie name that NextAuth's OWN sign-in flow sets.
+  //
+  //   (b) `getToken()` from "next-auth/jwt" (node_modules/next-auth/jwt/
+  //       index.js:65) defaults `secureCookie` to
+  //       `process.env.NEXTAUTH_URL?.startsWith("https://")`. This drives
+  //       the cookie name `getServerSession` LOOKS FOR.
+  //
+  // In PM Hub's Railway container these env vars deliberately have
+  // different schemes:
+  //   NEXT_PUBLIC_WEBAPP_URL = http://localhost:3010/cal-diy-iframe  (start.sh)
+  //     → so cal.diy server-side self-fetches (/api/logo etc.) bypass
+  //       PM Hub's Basic Auth gate via loopback
+  //   NEXTAUTH_URL = https://pm-agentic-hub-production.up.railway.app/cal-diy-iframe
+  //     → so NextAuth's absolute redirect URLs are browser-reachable
+  //
+  // So (a) → "next-auth.session-token", (b) → "__Secure-next-auth.session-token".
+  // We MUST align with (b) — the reader — because that's what
+  // getServerSession actually consults when validating the token on every
+  // TRPC request. The setter must speak the reader's language.
+  //
+  // History: an earlier fix (commit e75aa044, plus this branch's prior
+  // `ab74e476`) aligned the setter with (a), reasoning "match NextAuth's
+  // main cookies config." But getServerSession → getToken doesn't consult
+  // that config. Probe (c) of debug session iframe-webapp-url-conflict on
+  // 2026-05-17 confirmed that test requests with cookie name
+  // "__Secure-next-auth.session-token" succeed (200) while requests with
+  // "next-auth.session-token" fail (401), even though the underlying JWT
+  // token is identical in both cases. This is the re-applied 2026-05-17
+  // correction (stranded-branch commit 88a61e02) that main never received.
+  const useSecureCookies = (process.env.NEXTAUTH_URL ?? "").startsWith(
+    "https://",
+  );
   const cookieStore = await cookies();
-  const cookieName = isHttps
-    ? "__Secure-next-auth.session-token"
-    : "next-auth.session-token";
+  const cookieName = `${useSecureCookies ? "__Secure-" : ""}next-auth.session-token`;
   cookieStore.set(cookieName, token, {
     httpOnly: true,
-    secure: isHttps,
-    sameSite: isHttps ? "none" : "lax",
+    secure: useSecureCookies,
+    sameSite: useSecureCookies ? "none" : "lax",
     path: "/",
     maxAge: sessionMaxAge,
   });
 
   // 7. Redirect inside the iframe to the target route.
-  redirect(route);
+  //
+  // We emit the Location header directly via a raw Response (not
+  // `redirect()` from next/navigation, not `NextResponse.redirect()`):
+  //   - next/navigation `redirect()` has surprising basePath behavior
+  //     in route handlers under Next 16 prod (empirically:
+  //     redirect("/foo") → Location: /foo; redirect("/basePath/foo")
+  //     → Location: /basePath/basePath/foo).
+  //   - NextResponse.redirect() requires an absolute URL — `new URL(path,
+  //     req.url)` resolves against the INTERNAL origin (e.g.
+  //     http://0.0.0.0:3010/...) because cal.diy sits behind a rewrite
+  //     proxy and req.url reflects the upstream connection, not the
+  //     public browser-visible origin. The browser would then try to
+  //     navigate to that internal address and fail.
+  //
+  // A relative Location header on a plain Response sidesteps both:
+  // browsers resolve relative URLs against the origin of the document
+  // that received the response — i.e. the public PM Hub URL the iframe
+  // is actually loading from.
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
+  const bareRoute = route.startsWith("/") ? route : `/${route}`;
+  const fullPath = `${basePath}${bareRoute}`;
+  return new Response(null, {
+    status: 307,
+    headers: { Location: fullPath },
+  });
 }
 
 function jsonError(status: number, message: string): NextResponse {

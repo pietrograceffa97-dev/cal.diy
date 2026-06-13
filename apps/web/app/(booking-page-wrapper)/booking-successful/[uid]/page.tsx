@@ -20,7 +20,7 @@ export const metadata = {
 function getPreviewCardProps(variant: string) {
   const start = new Date("2026-07-15T15:00:00.000Z");
   const end = new Date("2026-07-15T15:30:00.000Z");
-  const attendeeName = variant === "no-name" ? null : "Jonathan Johnson";
+  const attendeeName = variant === "no-name" ? null : "Jakub Johnson";
   const successAccent = variant === "blue-check" ? "blue" : "green";
   return {
     uid: "preview",
@@ -33,7 +33,7 @@ function getPreviewCardProps(variant: string) {
     hostEmail: "pietro@example.com",
     hostAvatarUrl: null,
     attendeeName,
-    attendeeEmail: "jonathan@example.com",
+    attendeeEmail: "jakub@example.com",
     additionalInvitees: [],
     location: "https://app.cal.com/video/preview-room",
     startTime: start.toISOString(),

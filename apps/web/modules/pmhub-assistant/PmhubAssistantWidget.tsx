@@ -190,6 +190,8 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
   const [input, setInput] = useState("");
   const [pendingEl, setPendingEl] = useState<PickedElement | null>(null);
   const [triageSession, setTriageSession] = useState<TriageSession | null>(null);
+  // Validation-mode "Send to PM" status (idle | in-flight | sent | error).
+  const [pmSend, setPmSend] = useState<"idle" | "sending" | "sent" | { error: string }>("idle");
 
   // --- floating-window (Document PiP / popup) state ---
   // null = rendered in-page; a Window = popped out into a floating window.
@@ -471,10 +473,45 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
     setInput("");
     requestAnimationFrame(resizeInput);
 
-    const intent = classify(trimmed);
-    // All intents (testrun / bug / ask / feedback) are real now — the bot
-    // component handles its own loading state.
+    // In validation mode the composer is the stakeholder's assistant: the
+    // conversational send always asks the AI (answers inline, element-aware).
+    // Routing to bug→Jira / feedback→autoimprove would be wrong for a stakeholder
+    // — their feedback to the PM goes exclusively through "Send to PM" below.
+    const intent = validationMode ? "ask" : classify(trimmed);
     pushBot(intent, el, trimmed);
+  }
+
+  // Validation mode only: file the composer's text as a comment/question for the
+  // PM (tagged to the current page + variant). Separate from the AI ask above —
+  // this is the stakeholder's feedback that lands in the PM's review surface.
+  async function sendToPm() {
+    const text = input.trim();
+    if (!text || !boundId) return;
+    setPmSend("sending");
+    const variant =
+      (typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("variant")
+        : null) || undefined;
+    // The validation-comment schema is text-only by design (the AI ask carries the
+    // rich element context). When the stakeholder pointed at an element, fold its
+    // selector into the body as a plain reference so the PM has the anchor.
+    const body = pendingEl ? `[re: ${pendingEl.selector}] ${text}` : text;
+    const res = await pmhubPost<{ ok: boolean; comment: ValidationComment }>("validation/comment", {
+      projectId: boundId,
+      screen_route: route,
+      variant_key: variant,
+      body,
+      kind: detectValidationKind(text),
+    });
+    if (res.ok) {
+      setInput("");
+      setPendingEl(null);
+      requestAnimationFrame(resizeInput);
+      setPmSend("sent");
+      window.setTimeout(() => setPmSend("idle"), 2500);
+    } else {
+      setPmSend({ error: res.error });
+    }
   }
 
   function launchTestCase() {
@@ -766,7 +803,6 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
             )}
           </div>
 
-          {!validationMode && (
           <div className="pmha-composer">
             {pendingEl && (
               <div className="pmha-attached">
@@ -789,11 +825,18 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
                 rows={1}
                 className="pmha-input"
                 data-testid="pmhub-assistant.input"
-                placeholder={boundId ? "Run a test, ask why, or share feedback…" : "Pick a project to get started…"}
+                placeholder={
+                  validationMode
+                    ? "Ask about this page, or point at an element…"
+                    : boundId
+                      ? "Run a test, ask why, or share feedback…"
+                      : "Pick a project to get started…"
+                }
                 value={input}
                 onChange={(e) => {
                   setInput(e.target.value);
                   resizeInput();
+                  if (pmSend === "sent" || typeof pmSend === "object") setPmSend("idle");
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -813,14 +856,16 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
               </button>
             </div>
             <div className="pmha-ctools">
-              <button
-                type="button"
-                className="pmha-pe"
-                data-testid="pmhub-assistant.run-test"
-                onClick={launchTestCase}>
-                <IconTest size={13} />
-                Run a test case
-              </button>
+              {!validationMode && (
+                <button
+                  type="button"
+                  className="pmha-pe"
+                  data-testid="pmhub-assistant.run-test"
+                  onClick={launchTestCase}>
+                  <IconTest size={13} />
+                  Run a test case
+                </button>
+              )}
               <button
                 type="button"
                 className="pmha-pe"
@@ -831,9 +876,34 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
                 <IconCrosshair size={13} />
                 Point at an element
               </button>
+              {validationMode && (
+                <button
+                  type="button"
+                  className="pmha-pe"
+                  data-testid="pmhub-assistant.send-to-pm"
+                  disabled={!input.trim() || !boundId || pmSend === "sending"}
+                  onClick={() => void sendToPm()}>
+                  <IconFeedback size={13} />
+                  {pmSend === "sending" ? "Sending…" : "Send to PM"}
+                </button>
+              )}
             </div>
+            {validationMode && pmSend === "sent" && (
+              <div className="pmha-vhint pmha-vsent" data-testid="pmhub-assistant.validation.sent">
+                ✓ Sent to your PM
+              </div>
+            )}
+            {validationMode && typeof pmSend === "object" && (
+              <div className="pmha-vhint" data-testid="pmhub-assistant.validation.send-error">
+                Couldn’t send: {pmSend.error}
+              </div>
+            )}
+            {validationMode && input.trim() && pmSend !== "sent" && typeof pmSend !== "object" && (
+              <div className="pmha-vhint" data-testid="pmhub-assistant.validation.kind-hint">
+                “Send to PM” files this as a {detectValidationKind(input)} for your PM
+              </div>
+            )}
           </div>
-          )}
               </div>
               <div className="pmha-pane">
                 {triageSession && (
@@ -2068,16 +2138,6 @@ function ValidationRunner({
           ))}
         </div>
       )}
-
-      <ValidationComposer
-        projectId={projectId!}
-        screenRoute={screen?.route ?? route}
-        variantKey={currentVariant}
-        onPosted={(c) => {
-          setComments((arr) => [...arr, c]);
-          scrollToBottom();
-        }}
-      />
     </div>
   );
 }
@@ -2201,80 +2261,6 @@ function detectValidationKind(text: string): "comment" | "question" {
     return "question";
   }
   return "comment";
-}
-
-function ValidationComposer({
-  projectId,
-  screenRoute,
-  variantKey,
-  onPosted,
-}: {
-  projectId: string;
-  screenRoute: string;
-  variantKey: string;
-  onPosted: (comment: ValidationComment) => void;
-}) {
-  const [body, setBody] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-
-  const trimmed = body.trim();
-  const detectedKind = detectValidationKind(body);
-
-  async function send() {
-    if (!trimmed) return;
-    setBusy(true);
-    setErr("");
-    const res = await pmhubPost<{ ok: boolean; comment: ValidationComment }>("validation/comment", {
-      projectId,
-      screen_route: screenRoute,
-      variant_key: variantKey,
-      body: trimmed,
-      kind: detectValidationKind(trimmed),
-    });
-    setBusy(false);
-    if (res.ok && res.data?.comment) {
-      setBody("");
-      onPosted(res.data.comment);
-    } else {
-      setErr(res.ok ? "Couldn't post that." : res.error);
-    }
-  }
-
-  return (
-    <div className="pmha-vcomposer">
-      <div className="pmha-inputrow">
-        <textarea
-          className="pmha-input"
-          placeholder="Leave a comment or ask a question about this page…"
-          value={body}
-          rows={2}
-          onChange={(e) => setBody(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              void send();
-            }
-          }}
-          data-testid="pmhub-assistant.validation.input"
-        />
-        <button
-          type="button"
-          className="pmha-postbtn pmha-grad"
-          disabled={busy || !trimmed}
-          onClick={() => void send()}
-          data-testid="pmhub-assistant.validation.send">
-          {busy ? "Posting…" : "Post"}
-        </button>
-      </div>
-      {trimmed && (
-        <div className="pmha-vhint" data-testid="pmhub-assistant.validation.kind-hint">
-          Posts as a {detectedKind} · ⌘↵ to send
-        </div>
-      )}
-      {err && <div className="pmha-hint">{err}</div>}
-    </div>
-  );
 }
 
 function TriageProposalCard({
@@ -2720,11 +2706,8 @@ function WidgetStyles() {
       .pmha-pe:disabled{opacity:.45;cursor:default}
       .pmha-pe:disabled:hover{color:var(--sub);border-color:var(--hair)}
 
-      .pmha-vcomposer{margin-top:10px}
-      .pmha-postbtn{height:32px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;
-        border:none;color:#fff;cursor:pointer;flex:0 0 auto;font-size:12px;font-weight:650;padding:0 15px;letter-spacing:.2px}
-      .pmha-postbtn:disabled{opacity:.4;cursor:default}
       .pmha-vhint{font-size:10.5px;color:var(--sub);margin-top:6px;padding-left:3px}
+      .pmha-vsent{color:var(--green);font-weight:600}
       .pmha-vcomment{font-size:12px;color:var(--emph);border:1px solid var(--hair);background:var(--card);
         border-radius:9px;padding:7px 10px;margin-top:6px;line-height:1.45}
 

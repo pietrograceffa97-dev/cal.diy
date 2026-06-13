@@ -10,6 +10,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import { useRouter } from "next/navigation";
+
 import { startElementPick, type PickedElement } from "./lib/elementPick";
 import { pmhubGet, pmhubPost } from "./lib/pmhubClient";
 
@@ -178,6 +180,9 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
   const [open, setOpen] = useState(false);
   const [picking, setPicking] = useState(false);
   const [route, setRoute] = useState("");
+  // The `?variant=` on screen, kept live across SPA nav (mirrors `route`). The
+  // validation switcher drives it; the checklist + new comments tag to it.
+  const [liveVariant, setLiveVariant] = useState<string | null>(null);
   const [hiddenForOverlay, setHiddenForOverlay] = useState(false);
 
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
@@ -232,6 +237,7 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
     const params = new URLSearchParams(window.location.search);
     setHiddenForOverlay(params.has("pmhub_project_id"));
     setRoute(window.location.pathname);
+    setLiveVariant(params.get("variant"));
     setPipSupported(!!window.documentPictureInPicture);
     const fromUrl = params.get("pmhub_qa_project");
     const valid = fromUrl && PROJECT_BIND_REGEX.test(fromUrl) ? fromUrl : null;
@@ -298,7 +304,10 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
   // patch both plus popstate to re-read the path.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const sync = () => setRoute(window.location.pathname);
+    const sync = () => {
+      setRoute(window.location.pathname);
+      setLiveVariant(new URLSearchParams(window.location.search).get("variant"));
+    };
     const origPush = window.history.pushState;
     const origReplace = window.history.replaceState;
     window.history.pushState = function (...args) {
@@ -729,6 +738,7 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
                   text={m.text}
                   route={m.route}
                   liveRoute={route}
+                  liveVariant={liveVariant}
                   projectId={boundId}
                   scenarioId={m.scenarioId ?? null}
                   onReclassify={() => reclassify(m.id)}
@@ -867,6 +877,7 @@ function BotMessage({
   text,
   route,
   liveRoute,
+  liveVariant,
   projectId,
   scenarioId,
   onReclassify,
@@ -880,6 +891,8 @@ function BotMessage({
   route: string;
   /** The page currently on screen (updated on SPA nav) — validation tags to this, not the stamped `route`. */
   liveRoute?: string;
+  /** The `?variant=` currently on screen (updated on SPA nav) — drives the validation switcher + tagging. */
+  liveVariant?: string | null;
   projectId: string | null;
   /** Deep-linked scenario (from `?pmhub_qa_scenario=`) — seeded, not classified from typed text. */
   scenarioId?: string | null;
@@ -958,6 +971,7 @@ function BotMessage({
         <ValidationRunner
           projectId={projectId}
           route={liveRoute ?? route}
+          variant={liveVariant ?? null}
           scrollToBottom={scrollToBottom}
         />
       )}
@@ -1897,12 +1911,15 @@ type ValidationResponse = {
 function ValidationRunner({
   projectId,
   route,
+  variant,
   scrollToBottom,
 }: {
   projectId: string | null;
   route: string;
+  variant: string | null;
   scrollToBottom: () => void;
 }) {
+  const router = useRouter();
   const [data, setData] = useState<ValidationResponse | null>(null);
   const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
@@ -1956,13 +1973,38 @@ function ValidationRunner({
 
   const hasScreens = data.screens.length > 0;
   const screen = data.screens.find((s) => s.route === route) ?? null;
-  const pageItems = hasScreens ? items.filter((it) => it.screen_route === route) : items;
-  const pageComments = hasScreens ? comments.filter((c) => c.screen_route === route) : comments;
+  const screenVariants = screen?.variants ?? [];
   const pageLabel = screen?.label ?? route;
   const currentVariant =
+    variant ??
     (typeof window !== "undefined"
       ? new URLSearchParams(window.location.search).get("variant")
-      : null) || "default";
+      : null) ??
+    "default";
+
+  // Scope the checklist to the variant on screen when the page declares variants
+  // AND the live variant is one of them — so the items match what the stakeholder
+  // is looking at, instead of lumping every variant's items together. Degrades to
+  // all-items when the URL variant isn't a declared key (e.g. a link with no
+  // ?variant=), so a single-variant screen behaves exactly as before.
+  const variantScoped = screenVariants.some((v) => v.key === currentVariant);
+  const pageItems = (hasScreens ? items.filter((it) => it.screen_route === route) : items).filter(
+    (it) => !variantScoped || it.variant_key === currentVariant
+  );
+  const pageComments = (hasScreens ? comments.filter((c) => c.screen_route === route) : comments).filter(
+    (c) => !variantScoped || c.variant_key === currentVariant
+  );
+
+  // Soft-navigate the cal.diy page to the chosen variant. The booking pages read
+  // `?variant=` server-side, so router.push re-renders them into the new state
+  // with no full reload; the widget's patched pushState sync then re-derives
+  // liveVariant, re-scoping the checklist + tagging.
+  function switchVariant(key: string) {
+    if (key === currentVariant || typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    params.set("variant", key);
+    router.push(`${window.location.pathname}?${params.toString()}`);
+  }
 
   return (
     <div className="pmha-run" data-testid="pmhub-assistant.validation.runner">
@@ -1974,6 +2016,22 @@ function ValidationRunner({
           {pageItems.length} item{pageItems.length === 1 ? "" : "s"}
         </span>
       </div>
+
+      {screenVariants.length > 1 && (
+        <div className="pmha-vtabs" data-testid="pmhub-assistant.validation.variant-tabs">
+          {screenVariants.map((v) => (
+            <button
+              key={v.key}
+              type="button"
+              className={`pmha-vtab${v.key === currentVariant ? " pmha-vtab-on" : ""}`}
+              aria-pressed={v.key === currentVariant}
+              onClick={() => switchVariant(v.key)}
+              data-testid={`pmhub-assistant.validation.variant-${v.key}`}>
+              {v.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {data.checklist.length === 0 && (
         <div className="pmha-hint">
@@ -2584,6 +2642,11 @@ function WidgetStyles() {
       .pmha-rt{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:650;color:var(--emph)}
       .pmha-rt svg{color:var(--accent)}
       .pmha-prog{font-size:11px;color:var(--sub);font-family:var(--mono),ui-monospace,monospace}
+      .pmha-vtabs{display:flex;flex-wrap:wrap;gap:6px;padding:9px 13px;border-bottom:1px solid var(--hair)}
+      .pmha-vtab{font:inherit;font-size:11.5px;font-weight:600;color:var(--sub);background:var(--subtle);
+        border:1px solid var(--hair);border-radius:999px;padding:3px 11px;cursor:pointer;transition:color .12s,background .12s,border-color .12s}
+      .pmha-vtab:hover{color:var(--emph);border-color:var(--accent)}
+      .pmha-vtab-on{color:var(--accent);background:var(--accentbg);border-color:var(--accent)}
       .pmha-step{display:flex;align-items:flex-start;gap:10px;padding:10px 13px;border-bottom:1px solid var(--hair)}
       .pmha-pass{width:20px;height:20px;border-radius:6px;border:1.5px solid var(--hair);background:transparent;
         display:grid;place-items:center;cursor:pointer;flex:0 0 auto;margin-top:1px;color:transparent}

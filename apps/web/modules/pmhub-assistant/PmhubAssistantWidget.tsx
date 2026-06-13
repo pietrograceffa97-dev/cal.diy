@@ -57,7 +57,7 @@ type Props = {
   projectId: string | null;
 };
 
-type Intent = "testrun" | "bug" | "ask" | "feedback";
+type Intent = "testrun" | "bug" | "ask" | "feedback" | "validation";
 
 type ChatMsg =
   | { id: number; role: "user"; text: string; el: PickedElement | null }
@@ -86,8 +86,12 @@ const INTENT: Record<Intent, { label: string; icon: (size: number) => JSX.Elemen
   bug: { label: "Bug report", icon: (s) => <IconBug size={s} /> },
   ask: { label: "Question", icon: (s) => <IconAsk size={s} /> },
   feedback: { label: "Feedback", icon: (s) => <IconFeedback size={s} /> },
+  validation: { label: "Validation", icon: (s) => <IconValidation size={s} /> },
 };
 
+// Deliberately excludes "validation": this array is the "not this?" reclassify
+// cycle (see reclassify). Validation is a deep-link-only mode, never reached by
+// classifying typed text, so it must not be a cycle target.
 const INTENT_ORDER: Intent[] = ["testrun", "bug", "ask", "feedback"];
 
 /** In-page panel drag-to-resize bounds (px). No persistence — resets on reload. */
@@ -261,7 +265,57 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
             ]
       );
     }
+
+    // Deep link from Parallel's "Share for validation": auto-open straight into
+    // the per-page validation checklist. One-shot per page load (shares
+    // autoOpenedRef with the scenario link — the two link types never co-occur),
+    // deliberately NOT persisted to sessionStorage.
+    if (params.get("pmhub_qa_validation") === "1" && resolved && !autoOpenedRef.current) {
+      autoOpenedRef.current = true;
+      pinTopRef.current = true;
+      setOpen(true);
+      setMsgs((m) =>
+        m.length > 0
+          ? m
+          : [
+              {
+                id: (idRef.current += 1),
+                role: "bot",
+                intent: "validation",
+                el: null,
+                text: "Validate this design",
+                route: window.location.pathname,
+              },
+            ]
+      );
+    }
   }, [projectId]);
+
+  // Keep `route` current as the stakeholder/PM navigates cal.diy's SPA, so each
+  // new bot message — and the live validation checklist — is tagged to the page
+  // actually on screen. window.location is read once on mount above; Next's
+  // client router navigates via pushState/replaceState (no full reload), so we
+  // patch both plus popstate to re-read the path.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sync = () => setRoute(window.location.pathname);
+    const origPush = window.history.pushState;
+    const origReplace = window.history.replaceState;
+    window.history.pushState = function (...args) {
+      origPush.apply(this, args as Parameters<typeof origPush>);
+      sync();
+    };
+    window.history.replaceState = function (...args) {
+      origReplace.apply(this, args as Parameters<typeof origReplace>);
+      sync();
+    };
+    window.addEventListener("popstate", sync);
+    return () => {
+      window.history.pushState = origPush;
+      window.history.replaceState = origReplace;
+      window.removeEventListener("popstate", sync);
+    };
+  }, []);
 
   function bindProject(id: string) {
     window.sessionStorage.setItem(PROJECT_BIND_KEY, id);
@@ -670,6 +724,7 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
                   el={m.el}
                   text={m.text}
                   route={m.route}
+                  liveRoute={route}
                   projectId={boundId}
                   scenarioId={m.scenarioId ?? null}
                   onReclassify={() => reclassify(m.id)}
@@ -805,6 +860,7 @@ function BotMessage({
   el,
   text,
   route,
+  liveRoute,
   projectId,
   scenarioId,
   onReclassify,
@@ -816,6 +872,8 @@ function BotMessage({
   el: PickedElement | null;
   text: string;
   route: string;
+  /** The page currently on screen (updated on SPA nav) — validation tags to this, not the stamped `route`. */
+  liveRoute?: string;
   projectId: string | null;
   /** Deep-linked scenario (from `?pmhub_qa_scenario=`) — seeded, not classified from typed text. */
   scenarioId?: string | null;
@@ -838,7 +896,7 @@ function BotMessage({
         <span className="pmha-pill">
           {meta.icon(12)} {meta.label}
         </span>
-        {scenarioId ? (
+        {scenarioId || intent === "validation" ? (
           <span>linked from Parallel</span>
         ) : (
           <>
@@ -886,6 +944,14 @@ function BotMessage({
           route={route}
           el={el}
           projectId={projectId}
+          scrollToBottom={scrollToBottom}
+        />
+      )}
+
+      {intent === "validation" && (
+        <ValidationRunner
+          projectId={projectId}
+          route={liveRoute ?? route}
           scrollToBottom={scrollToBottom}
         />
       )}
@@ -1773,6 +1839,369 @@ function ScenarioRunner({
   );
 }
 
+/* --------------------------- validation flow (real) --------------------------- */
+
+type ValidationItem = {
+  id: string;
+  screen_route: string;
+  variant_key: string;
+  text: string;
+  status: "pending" | "approved" | "flagged";
+  flag_note?: string;
+  resolved?: boolean;
+  resolution_note?: string;
+};
+
+type ValidationComment = {
+  id: string;
+  screen_route: string;
+  variant_key: string;
+  body: string;
+  kind: "comment" | "question";
+  created_at: string;
+  resolved: boolean;
+  resolution_note?: string;
+};
+
+type ValidationScreen = {
+  route: string;
+  label: string;
+  has_existing_design: boolean;
+  variants: { key: string; label: string }[];
+};
+
+type ValidationResponse = {
+  projectId: string;
+  title: string;
+  state: string;
+  screens: ValidationScreen[];
+  checklist: ValidationItem[];
+  comments: ValidationComment[];
+  shareCount: number;
+};
+
+/**
+ * Stakeholder validation surface — the per-page checklist + comment composer the
+ * auto-logged-in stakeholder reacts to. Mirrors TestRunner's fetch/phase shape,
+ * but instead of a one-scenario walkthrough it shows every checklist item +
+ * comment scoped to the page currently on screen (`route`, kept live by the
+ * widget's SPA-route effect). Approve/flag + comments POST straight to Parallel
+ * (the stakeholder's own input — no preview-and-approve).
+ */
+function ValidationRunner({
+  projectId,
+  route,
+  scrollToBottom,
+}: {
+  projectId: string | null;
+  route: string;
+  scrollToBottom: () => void;
+}) {
+  const [data, setData] = useState<ValidationResponse | null>(null);
+  const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
+  const [error, setError] = useState("");
+  const [items, setItems] = useState<ValidationItem[]>([]);
+  const [comments, setComments] = useState<ValidationComment[]>([]);
+  const ranRef = useRef(false);
+
+  useEffect(() => {
+    if (ranRef.current) return;
+    ranRef.current = true;
+    if (!projectId) {
+      setError("No Parallel project is connected to this page. Open the validation link your PM shared.");
+      setPhase("error");
+      return;
+    }
+    (async () => {
+      const res = await pmhubGet<ValidationResponse>("validation", { projectId });
+      if (res.ok) {
+        setData(res.data);
+        setItems(res.data.checklist);
+        setComments(res.data.comments);
+        setPhase("ready");
+      } else {
+        setError(res.error);
+        setPhase("error");
+      }
+      scrollToBottom();
+    })();
+  }, [projectId, scrollToBottom]);
+
+  if (phase === "loading") {
+    return (
+      <div className="pmha-bub" data-testid="pmhub-assistant.validation.loading">
+        Loading the validation checklist…
+        <div className="pmha-typing" style={{ marginTop: 8 }}>
+          <span />
+          <span />
+          <span />
+        </div>
+      </div>
+    );
+  }
+  if (phase === "error") {
+    return (
+      <div className="pmha-bub" data-testid="pmhub-assistant.validation.error">
+        I couldn't load the checklist: {error}
+      </div>
+    );
+  }
+  if (!data) return null;
+
+  const hasScreens = data.screens.length > 0;
+  const screen = data.screens.find((s) => s.route === route) ?? null;
+  const pageItems = hasScreens ? items.filter((it) => it.screen_route === route) : items;
+  const pageComments = hasScreens ? comments.filter((c) => c.screen_route === route) : comments;
+  const pageLabel = screen?.label ?? route;
+  const currentVariant =
+    (typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("variant")
+      : null) || "default";
+
+  return (
+    <div className="pmha-run" data-testid="pmhub-assistant.validation.runner">
+      <div className="pmha-run-head">
+        <div className="pmha-rt">
+          <IconValidation size={15} /> Validate: {pageLabel}
+        </div>
+        <span className="pmha-prog">
+          {pageItems.length} item{pageItems.length === 1 ? "" : "s"}
+        </span>
+      </div>
+
+      {data.checklist.length === 0 && (
+        <div className="pmha-hint">
+          No checklist yet — leave a comment below, or your PM will share one shortly.
+        </div>
+      )}
+
+      {hasScreens && data.checklist.length > 0 && pageItems.length === 0 && (
+        <div className="pmha-hint">
+          No checklist items for this page. Navigate to another screen, or leave a comment below.
+        </div>
+      )}
+
+      {pageItems.map((it) => (
+        <ValidationItemRow
+          key={it.id}
+          projectId={projectId!}
+          item={it}
+          onUpdated={(u) => setItems((arr) => arr.map((x) => (x.id === u.id ? u : x)))}
+        />
+      ))}
+
+      {pageComments.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          {pageComments.map((c) => (
+            <div key={c.id} className="pmha-vcomment">
+              <span className="pmha-pill">{c.kind === "question" ? "Question" : "Comment"}</span> {c.body}
+              {c.resolved && c.resolution_note && (
+                <div className="pmha-hint" style={{ marginTop: 4 }}>
+                  ✓ PM resolved: {c.resolution_note}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <ValidationComposer
+        projectId={projectId!}
+        screenRoute={screen?.route ?? route}
+        variantKey={currentVariant}
+        onPosted={(c) => {
+          setComments((arr) => [...arr, c]);
+          scrollToBottom();
+        }}
+      />
+    </div>
+  );
+}
+
+function ValidationItemRow({
+  projectId,
+  item,
+  onUpdated,
+}: {
+  projectId: string;
+  item: ValidationItem;
+  onUpdated: (updated: ValidationItem) => void;
+}) {
+  const [flagging, setFlagging] = useState(false);
+  const [note, setNote] = useState(item.flag_note ?? "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function respond(status: "approved" | "flagged", flag_note?: string) {
+    setBusy(true);
+    setErr("");
+    const res = await pmhubPost<{ ok: boolean; item: ValidationItem }>("validation/respond", {
+      projectId,
+      itemId: item.id,
+      status,
+      flag_note,
+    });
+    setBusy(false);
+    if (res.ok && res.data?.item) {
+      onUpdated(res.data.item);
+      setFlagging(false);
+    } else {
+      setErr(res.ok ? "Couldn't save that." : res.error);
+    }
+  }
+
+  return (
+    <div
+      className={`pmha-step${item.status === "approved" ? " pmha-passed" : ""}${
+        item.status === "flagged" ? " pmha-failed" : ""
+      }`}>
+      <button
+        type="button"
+        aria-label="Approve this item"
+        className="pmha-pass"
+        disabled={busy}
+        onClick={() => respond("approved")}
+        data-testid="pmhub-assistant.validation.approve">
+        <IconCheck size={13} />
+      </button>
+      <div className="pmha-step-main">
+        <div className="pmha-step-txt">{item.text}</div>
+        {item.status !== "pending" && (
+          <div className="pmha-hint" style={{ marginTop: 3 }}>
+            {item.status === "approved" ? "Approved ✓" : "Flagged ⚑"}
+            {item.flag_note ? ` — ${item.flag_note}` : ""}
+          </div>
+        )}
+        {item.resolved && item.resolution_note && (
+          <div className="pmha-hint" style={{ marginTop: 3 }}>
+            ✓ PM resolved: {item.resolution_note}
+          </div>
+        )}
+        {flagging && (
+          <div className="pmha-inputrow" style={{ marginTop: 6 }}>
+            <textarea
+              className="pmha-input"
+              placeholder="What's off? (optional)"
+              value={note}
+              rows={2}
+              onChange={(e) => setNote(e.target.value)}
+              data-testid="pmhub-assistant.validation.flag-note"
+            />
+            <button
+              type="button"
+              className="pmha-sendbtn pmha-grad"
+              disabled={busy}
+              onClick={() => respond("flagged", note.trim() || undefined)}>
+              <IconSend size={15} />
+            </button>
+          </div>
+        )}
+        {err && (
+          <div className="pmha-hint" style={{ marginTop: 3 }}>
+            {err}
+          </div>
+        )}
+      </div>
+      <button
+        type="button"
+        className="pmha-flag"
+        disabled={busy}
+        onClick={() =>
+          item.status === "flagged"
+            ? respond("flagged", note.trim() || undefined)
+            : setFlagging((v) => !v)
+        }
+        data-testid="pmhub-assistant.validation.flag">
+        <IconFlag size={12} /> Flag
+      </button>
+    </div>
+  );
+}
+
+function ValidationComposer({
+  projectId,
+  screenRoute,
+  variantKey,
+  onPosted,
+}: {
+  projectId: string;
+  screenRoute: string;
+  variantKey: string;
+  onPosted: (comment: ValidationComment) => void;
+}) {
+  const [body, setBody] = useState("");
+  const [kind, setKind] = useState<"comment" | "question">("comment");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function send() {
+    const text = body.trim();
+    if (!text) return;
+    setBusy(true);
+    setErr("");
+    const res = await pmhubPost<{ ok: boolean; comment: ValidationComment }>("validation/comment", {
+      projectId,
+      screen_route: screenRoute,
+      variant_key: variantKey,
+      body: text,
+      kind,
+    });
+    setBusy(false);
+    if (res.ok && res.data?.comment) {
+      setBody("");
+      onPosted(res.data.comment);
+    } else {
+      setErr(res.ok ? "Couldn't post that." : res.error);
+    }
+  }
+
+  return (
+    <div className="pmha-vcomposer">
+      <div className="pmha-vkinds">
+        <button
+          type="button"
+          className="pmha-btn"
+          style={{ opacity: kind === "comment" ? 1 : 0.5 }}
+          onClick={() => setKind("comment")}>
+          Comment
+        </button>
+        <button
+          type="button"
+          className="pmha-btn"
+          style={{ opacity: kind === "question" ? 1 : 0.5 }}
+          onClick={() => setKind("question")}>
+          Question
+        </button>
+      </div>
+      <div className="pmha-inputrow">
+        <textarea
+          className="pmha-input"
+          placeholder={kind === "question" ? "Ask a question about this page…" : "Leave a comment on this page…"}
+          value={body}
+          rows={2}
+          onChange={(e) => setBody(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              void send();
+            }
+          }}
+          data-testid="pmhub-assistant.validation.input"
+        />
+        <button
+          type="button"
+          className="pmha-sendbtn pmha-grad"
+          disabled={busy || !body.trim()}
+          onClick={() => void send()}
+          data-testid="pmhub-assistant.validation.send">
+          <IconSend size={15} />
+        </button>
+      </div>
+      {err && <div className="pmha-hint">{err}</div>}
+    </div>
+  );
+}
+
 function TriageProposalCard({
   projectId,
   scenarioId,
@@ -1834,6 +2263,18 @@ function TriageProposalCard({
 /* --------------------------------- icons --------------------------------- */
 
 type IconProps = { size?: number };
+
+function IconValidation({ size = 16 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <rect x="4" y="3.5" width="16" height="17" rx="2.5" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M7.3 8.9l1.4 1.4 2.4-2.6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M14 9h2.6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M7.3 15l1.4 1.4 2.4-2.6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M14 15.1h2.6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 function IconTest({ size = 16 }: IconProps) {
   return (
@@ -2198,6 +2639,11 @@ function WidgetStyles() {
       .pmha-pe:hover{color:var(--emph);border-color:var(--accent)}
       .pmha-pe:disabled{opacity:.45;cursor:default}
       .pmha-pe:disabled:hover{color:var(--sub);border-color:var(--hair)}
+
+      .pmha-vcomposer{margin-top:10px}
+      .pmha-vkinds{display:flex;gap:6px;margin-bottom:6px}
+      .pmha-vcomment{font-size:12px;color:var(--emph);border:1px solid var(--hair);background:var(--card);
+        border-radius:9px;padding:7px 10px;margin-top:6px;line-height:1.45}
 
       @media (prefers-reduced-motion: reduce){
         .pmha-pac{animation:none;clip-path:polygon(50% 50%,100% 33%,100% 0,0 0,0 100%,100% 100%,100% 67%)}

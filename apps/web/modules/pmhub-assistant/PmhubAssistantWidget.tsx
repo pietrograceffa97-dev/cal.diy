@@ -582,6 +582,10 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
   }
 
   const showEmpty = msgs.length === 0 && !typing;
+  // When a validation share-link auto-opened the per-page checklist, that card's
+  // own comment/question composer IS the chat — hide the generic footer composer
+  // so the stakeholder only ever sees one input (PM directive: "always one chat").
+  const validationMode = msgs.some((m) => m.role === "bot" && m.intent === "validation");
 
   return (
     <div className="pmha-root" data-testid="pmhub-assistant.root" style={{ display: picking ? "none" : undefined }}>
@@ -752,6 +756,7 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
             )}
           </div>
 
+          {!validationMode && (
           <div className="pmha-composer">
             {pendingEl && (
               <div className="pmha-attached">
@@ -818,6 +823,7 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
               </button>
             </div>
           </div>
+          )}
               </div>
               <div className="pmha-pane">
                 {triageSession && (
@@ -2118,6 +2124,27 @@ function ValidationItemRow({
   );
 }
 
+/**
+ * Infer comment-vs-question from the text itself so the stakeholder never has to
+ * pick a mode (PM directive: "the chat should understand by itself"). A trailing
+ * "?" or a leading interrogative reads as a question; everything else is a
+ * comment. The kind is only the label the PM sees on the review surface, so a
+ * cheap heuristic is the right altitude here — no LLM round-trip for a tag.
+ */
+function detectValidationKind(text: string): "comment" | "question" {
+  const t = text.trim().toLowerCase();
+  if (!t) return "comment";
+  if (t.endsWith("?")) return "question";
+  if (
+    /^(why|what|what'?s|how|how'?s|when|where|who|which|whose|whom|is|are|am|do|does|did|can|could|should|would|will|won'?t|wouldn'?t|shouldn'?t|may|might|shall|have|has|had)\b/.test(
+      t
+    )
+  ) {
+    return "question";
+  }
+  return "comment";
+}
+
 function ValidationComposer({
   projectId,
   screenRoute,
@@ -2130,21 +2157,22 @@ function ValidationComposer({
   onPosted: (comment: ValidationComment) => void;
 }) {
   const [body, setBody] = useState("");
-  const [kind, setKind] = useState<"comment" | "question">("comment");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
+  const trimmed = body.trim();
+  const detectedKind = detectValidationKind(body);
+
   async function send() {
-    const text = body.trim();
-    if (!text) return;
+    if (!trimmed) return;
     setBusy(true);
     setErr("");
     const res = await pmhubPost<{ ok: boolean; comment: ValidationComment }>("validation/comment", {
       projectId,
       screen_route: screenRoute,
       variant_key: variantKey,
-      body: text,
-      kind,
+      body: trimmed,
+      kind: detectValidationKind(trimmed),
     });
     setBusy(false);
     if (res.ok && res.data?.comment) {
@@ -2157,26 +2185,10 @@ function ValidationComposer({
 
   return (
     <div className="pmha-vcomposer">
-      <div className="pmha-vkinds">
-        <button
-          type="button"
-          className="pmha-btn"
-          style={{ opacity: kind === "comment" ? 1 : 0.5 }}
-          onClick={() => setKind("comment")}>
-          Comment
-        </button>
-        <button
-          type="button"
-          className="pmha-btn"
-          style={{ opacity: kind === "question" ? 1 : 0.5 }}
-          onClick={() => setKind("question")}>
-          Question
-        </button>
-      </div>
       <div className="pmha-inputrow">
         <textarea
           className="pmha-input"
-          placeholder={kind === "question" ? "Ask a question about this page…" : "Leave a comment on this page…"}
+          placeholder="Leave a comment or ask a question about this page…"
           value={body}
           rows={2}
           onChange={(e) => setBody(e.target.value)}
@@ -2190,13 +2202,18 @@ function ValidationComposer({
         />
         <button
           type="button"
-          className="pmha-sendbtn pmha-grad"
-          disabled={busy || !body.trim()}
+          className="pmha-postbtn pmha-grad"
+          disabled={busy || !trimmed}
           onClick={() => void send()}
           data-testid="pmhub-assistant.validation.send">
-          <IconSend size={15} />
+          {busy ? "Posting…" : "Post"}
         </button>
       </div>
+      {trimmed && (
+        <div className="pmha-vhint" data-testid="pmhub-assistant.validation.kind-hint">
+          Posts as a {detectedKind} · ⌘↵ to send
+        </div>
+      )}
       {err && <div className="pmha-hint">{err}</div>}
     </div>
   );
@@ -2641,7 +2658,10 @@ function WidgetStyles() {
       .pmha-pe:disabled:hover{color:var(--sub);border-color:var(--hair)}
 
       .pmha-vcomposer{margin-top:10px}
-      .pmha-vkinds{display:flex;gap:6px;margin-bottom:6px}
+      .pmha-postbtn{height:32px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;
+        border:none;color:#fff;cursor:pointer;flex:0 0 auto;font-size:12px;font-weight:650;padding:0 15px;letter-spacing:.2px}
+      .pmha-postbtn:disabled{opacity:.4;cursor:default}
+      .pmha-vhint{font-size:10.5px;color:var(--sub);margin-top:6px;padding-left:3px}
       .pmha-vcomment{font-size:12px;color:var(--emph);border:1px solid var(--hair);background:var(--card);
         border-radius:9px;padding:7px 10px;margin-top:6px;line-height:1.45}
 

@@ -138,7 +138,7 @@ export function BookingSuccessCard({
                 className="text-emphasis mt-3 text-base font-medium leading-6"
                 data-testid="booking-success-thankyou">
                 {greetingName ? `You're the best, ${greetingName}! ` : `You're the best! `}
-                <span aria-hidden="true">🎉</span>
+                <span aria-hidden="true">🎉 😊</span>
               </p>
             )}
             {subtitle && <p className="text-default mt-3 text-sm leading-5">{subtitle}</p>}

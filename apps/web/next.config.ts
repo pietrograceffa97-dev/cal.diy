@@ -376,10 +376,6 @@ const nextConfig = (phase: string): NextConfig => {
           destination: "/api/user/avatar?teamname=:teamname",
         },
         {
-          source: "/icons/sprite.svg",
-          destination: `${process.env.NEXT_PUBLIC_WEBAPP_URL}/icons/sprite.svg`,
-        },
-        {
           source: "/_proxy/dub/track/:path",
           destination: "https://api.dub.co/track/:path",
         },

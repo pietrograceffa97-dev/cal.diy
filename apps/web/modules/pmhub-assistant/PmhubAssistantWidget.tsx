@@ -827,7 +827,7 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
                 data-testid="pmhub-assistant.input"
                 placeholder={
                   validationMode
-                    ? "Ask about this page, or point at an element…"
+                    ? "Leave a comment or question on this page…"
                     : boundId
                       ? "Run a test, ask why, or share feedback…"
                       : "Pick a project to get started…"
@@ -841,22 +841,23 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                     e.preventDefault();
-                    sendText(input);
+                    if (validationMode) void sendToPm();
+                    else sendText(input);
                   }
                 }}
               />
               <button
                 type="button"
-                aria-label="Send"
+                aria-label={validationMode ? "Send to PM" : "Send"}
                 data-testid="pmhub-assistant.send"
                 className="pmha-sendbtn pmha-grad"
-                disabled={!input.trim() || !boundId}
-                onClick={() => sendText(input)}>
+                disabled={!input.trim() || !boundId || (validationMode && pmSend === "sending")}
+                onClick={() => (validationMode ? void sendToPm() : sendText(input))}>
                 <IconSend size={16} />
               </button>
             </div>
-            <div className="pmha-ctools">
-              {!validationMode && (
+            {!validationMode && (
+              <div className="pmha-ctools">
                 <button
                   type="button"
                   className="pmha-pe"
@@ -865,29 +866,18 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
                   <IconTest size={13} />
                   Run a test case
                 </button>
-              )}
-              <button
-                type="button"
-                className="pmha-pe"
-                data-testid="pmhub-assistant.point-element"
-                onClick={startPick}
-                disabled={poppedOut}
-                title={poppedOut ? "Bring the assistant back in-page to point at an element" : undefined}>
-                <IconCrosshair size={13} />
-                Point at an element
-              </button>
-              {validationMode && (
                 <button
                   type="button"
                   className="pmha-pe"
-                  data-testid="pmhub-assistant.send-to-pm"
-                  disabled={!input.trim() || !boundId || pmSend === "sending"}
-                  onClick={() => void sendToPm()}>
-                  <IconFeedback size={13} />
-                  {pmSend === "sending" ? "Sending…" : "Send to PM"}
+                  data-testid="pmhub-assistant.point-element"
+                  onClick={startPick}
+                  disabled={poppedOut}
+                  title={poppedOut ? "Bring the assistant back in-page to point at an element" : undefined}>
+                  <IconCrosshair size={13} />
+                  Point at an element
                 </button>
-              )}
-            </div>
+              </div>
+            )}
             {validationMode && pmSend === "sent" && (
               <div className="pmha-vhint pmha-vsent" data-testid="pmhub-assistant.validation.sent">
                 ✓ Sent to your PM
@@ -900,7 +890,7 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
             )}
             {validationMode && input.trim() && pmSend !== "sent" && typeof pmSend !== "object" && (
               <div className="pmha-vhint" data-testid="pmhub-assistant.validation.kind-hint">
-                “Send to PM” files this as a {detectValidationKind(input)} for your PM
+                Files this as a {detectValidationKind(input)} for your PM
               </div>
             )}
           </div>

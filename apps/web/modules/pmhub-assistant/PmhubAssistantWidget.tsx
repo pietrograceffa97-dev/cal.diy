@@ -10,6 +10,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import { useRouter } from "next/navigation";
+
 import { startElementPick, type PickedElement } from "./lib/elementPick";
 import { pmhubGet, pmhubPost } from "./lib/pmhubClient";
 
@@ -178,6 +180,9 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
   const [open, setOpen] = useState(false);
   const [picking, setPicking] = useState(false);
   const [route, setRoute] = useState("");
+  // The `?variant=` on screen, kept live across SPA nav (mirrors `route`). The
+  // validation switcher drives it; the checklist + new comments tag to it.
+  const [liveVariant, setLiveVariant] = useState<string | null>(null);
   const [hiddenForOverlay, setHiddenForOverlay] = useState(false);
 
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
@@ -185,6 +190,8 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
   const [input, setInput] = useState("");
   const [pendingEl, setPendingEl] = useState<PickedElement | null>(null);
   const [triageSession, setTriageSession] = useState<TriageSession | null>(null);
+  // Validation-mode "Send to PM" status (idle | in-flight | sent | error).
+  const [pmSend, setPmSend] = useState<"idle" | "sending" | "sent" | { error: string }>("idle");
 
   // --- floating-window (Document PiP / popup) state ---
   // null = rendered in-page; a Window = popped out into a floating window.
@@ -232,6 +239,7 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
     const params = new URLSearchParams(window.location.search);
     setHiddenForOverlay(params.has("pmhub_project_id"));
     setRoute(window.location.pathname);
+    setLiveVariant(params.get("variant"));
     setPipSupported(!!window.documentPictureInPicture);
     const fromUrl = params.get("pmhub_qa_project");
     const valid = fromUrl && PROJECT_BIND_REGEX.test(fromUrl) ? fromUrl : null;
@@ -298,7 +306,10 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
   // patch both plus popstate to re-read the path.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const sync = () => setRoute(window.location.pathname);
+    const sync = () => {
+      setRoute(window.location.pathname);
+      setLiveVariant(new URLSearchParams(window.location.search).get("variant"));
+    };
     const origPush = window.history.pushState;
     const origReplace = window.history.replaceState;
     window.history.pushState = function (...args) {
@@ -462,10 +473,45 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
     setInput("");
     requestAnimationFrame(resizeInput);
 
-    const intent = classify(trimmed);
-    // All intents (testrun / bug / ask / feedback) are real now — the bot
-    // component handles its own loading state.
+    // In validation mode the composer is the stakeholder's assistant: the
+    // conversational send always asks the AI (answers inline, element-aware).
+    // Routing to bug→Jira / feedback→autoimprove would be wrong for a stakeholder
+    // — their feedback to the PM goes exclusively through "Send to PM" below.
+    const intent = validationMode ? "ask" : classify(trimmed);
     pushBot(intent, el, trimmed);
+  }
+
+  // Validation mode only: file the composer's text as a comment/question for the
+  // PM (tagged to the current page + variant). Separate from the AI ask above —
+  // this is the stakeholder's feedback that lands in the PM's review surface.
+  async function sendToPm() {
+    const text = input.trim();
+    if (!text || !boundId) return;
+    setPmSend("sending");
+    const variant =
+      (typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("variant")
+        : null) || undefined;
+    // The validation-comment schema is text-only by design (the AI ask carries the
+    // rich element context). When the stakeholder pointed at an element, fold its
+    // selector into the body as a plain reference so the PM has the anchor.
+    const body = pendingEl ? `[re: ${pendingEl.selector}] ${text}` : text;
+    const res = await pmhubPost<{ ok: boolean; comment: ValidationComment }>("validation/comment", {
+      projectId: boundId,
+      screen_route: route,
+      variant_key: variant,
+      body,
+      kind: detectValidationKind(text),
+    });
+    if (res.ok) {
+      setInput("");
+      setPendingEl(null);
+      requestAnimationFrame(resizeInput);
+      setPmSend("sent");
+      window.setTimeout(() => setPmSend("idle"), 2500);
+    } else {
+      setPmSend({ error: res.error });
+    }
   }
 
   function launchTestCase() {
@@ -582,6 +628,10 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
   }
 
   const showEmpty = msgs.length === 0 && !typing;
+  // When a validation share-link auto-opened the per-page checklist, that card's
+  // own comment/question composer IS the chat — hide the generic footer composer
+  // so the stakeholder only ever sees one input (PM directive: "always one chat").
+  const validationMode = msgs.some((m) => m.role === "bot" && m.intent === "validation");
 
   return (
     <div className="pmha-root" data-testid="pmhub-assistant.root" style={{ display: picking ? "none" : undefined }}>
@@ -725,6 +775,7 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
                   text={m.text}
                   route={m.route}
                   liveRoute={route}
+                  liveVariant={liveVariant}
                   projectId={boundId}
                   scenarioId={m.scenarioId ?? null}
                   onReclassify={() => reclassify(m.id)}
@@ -774,49 +825,74 @@ export default function PmhubAssistantWidget({ enabled, projectId }: Props) {
                 rows={1}
                 className="pmha-input"
                 data-testid="pmhub-assistant.input"
-                placeholder={boundId ? "Run a test, ask why, or share feedback…" : "Pick a project to get started…"}
+                placeholder={
+                  validationMode
+                    ? "Leave a comment or question on this page…"
+                    : boundId
+                      ? "Run a test, ask why, or share feedback…"
+                      : "Pick a project to get started…"
+                }
                 value={input}
                 onChange={(e) => {
                   setInput(e.target.value);
                   resizeInput();
+                  if (pmSend === "sent" || typeof pmSend === "object") setPmSend("idle");
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                     e.preventDefault();
-                    sendText(input);
+                    if (validationMode) void sendToPm();
+                    else sendText(input);
                   }
                 }}
               />
               <button
                 type="button"
-                aria-label="Send"
+                aria-label={validationMode ? "Send to PM" : "Send"}
                 data-testid="pmhub-assistant.send"
                 className="pmha-sendbtn pmha-grad"
-                disabled={!input.trim() || !boundId}
-                onClick={() => sendText(input)}>
+                disabled={!input.trim() || !boundId || (validationMode && pmSend === "sending")}
+                onClick={() => (validationMode ? void sendToPm() : sendText(input))}>
                 <IconSend size={16} />
               </button>
             </div>
-            <div className="pmha-ctools">
-              <button
-                type="button"
-                className="pmha-pe"
-                data-testid="pmhub-assistant.run-test"
-                onClick={launchTestCase}>
-                <IconTest size={13} />
-                Run a test case
-              </button>
-              <button
-                type="button"
-                className="pmha-pe"
-                data-testid="pmhub-assistant.point-element"
-                onClick={startPick}
-                disabled={poppedOut}
-                title={poppedOut ? "Bring the assistant back in-page to point at an element" : undefined}>
-                <IconCrosshair size={13} />
-                Point at an element
-              </button>
-            </div>
+            {!validationMode && (
+              <div className="pmha-ctools">
+                <button
+                  type="button"
+                  className="pmha-pe"
+                  data-testid="pmhub-assistant.run-test"
+                  onClick={launchTestCase}>
+                  <IconTest size={13} />
+                  Run a test case
+                </button>
+                <button
+                  type="button"
+                  className="pmha-pe"
+                  data-testid="pmhub-assistant.point-element"
+                  onClick={startPick}
+                  disabled={poppedOut}
+                  title={poppedOut ? "Bring the assistant back in-page to point at an element" : undefined}>
+                  <IconCrosshair size={13} />
+                  Point at an element
+                </button>
+              </div>
+            )}
+            {validationMode && pmSend === "sent" && (
+              <div className="pmha-vhint pmha-vsent" data-testid="pmhub-assistant.validation.sent">
+                ✓ Sent to your PM
+              </div>
+            )}
+            {validationMode && typeof pmSend === "object" && (
+              <div className="pmha-vhint" data-testid="pmhub-assistant.validation.send-error">
+                Couldn’t send: {pmSend.error}
+              </div>
+            )}
+            {validationMode && input.trim() && pmSend !== "sent" && typeof pmSend !== "object" && (
+              <div className="pmha-vhint" data-testid="pmhub-assistant.validation.kind-hint">
+                Files this as a {detectValidationKind(input)} for your PM
+              </div>
+            )}
           </div>
               </div>
               <div className="pmha-pane">
@@ -861,6 +937,7 @@ function BotMessage({
   text,
   route,
   liveRoute,
+  liveVariant,
   projectId,
   scenarioId,
   onReclassify,
@@ -874,6 +951,8 @@ function BotMessage({
   route: string;
   /** The page currently on screen (updated on SPA nav) — validation tags to this, not the stamped `route`. */
   liveRoute?: string;
+  /** The `?variant=` currently on screen (updated on SPA nav) — drives the validation switcher + tagging. */
+  liveVariant?: string | null;
   projectId: string | null;
   /** Deep-linked scenario (from `?pmhub_qa_scenario=`) — seeded, not classified from typed text. */
   scenarioId?: string | null;
@@ -952,6 +1031,7 @@ function BotMessage({
         <ValidationRunner
           projectId={projectId}
           route={liveRoute ?? route}
+          variant={liveVariant ?? null}
           scrollToBottom={scrollToBottom}
         />
       )}
@@ -1891,12 +1971,15 @@ type ValidationResponse = {
 function ValidationRunner({
   projectId,
   route,
+  variant,
   scrollToBottom,
 }: {
   projectId: string | null;
   route: string;
+  variant: string | null;
   scrollToBottom: () => void;
 }) {
+  const router = useRouter();
   const [data, setData] = useState<ValidationResponse | null>(null);
   const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
@@ -1950,13 +2033,38 @@ function ValidationRunner({
 
   const hasScreens = data.screens.length > 0;
   const screen = data.screens.find((s) => s.route === route) ?? null;
-  const pageItems = hasScreens ? items.filter((it) => it.screen_route === route) : items;
-  const pageComments = hasScreens ? comments.filter((c) => c.screen_route === route) : comments;
+  const screenVariants = screen?.variants ?? [];
   const pageLabel = screen?.label ?? route;
   const currentVariant =
+    variant ??
     (typeof window !== "undefined"
       ? new URLSearchParams(window.location.search).get("variant")
-      : null) || "default";
+      : null) ??
+    "default";
+
+  // Scope the checklist to the variant on screen when the page declares variants
+  // AND the live variant is one of them — so the items match what the stakeholder
+  // is looking at, instead of lumping every variant's items together. Degrades to
+  // all-items when the URL variant isn't a declared key (e.g. a link with no
+  // ?variant=), so a single-variant screen behaves exactly as before.
+  const variantScoped = screenVariants.some((v) => v.key === currentVariant);
+  const pageItems = (hasScreens ? items.filter((it) => it.screen_route === route) : items).filter(
+    (it) => !variantScoped || it.variant_key === currentVariant
+  );
+  const pageComments = (hasScreens ? comments.filter((c) => c.screen_route === route) : comments).filter(
+    (c) => !variantScoped || c.variant_key === currentVariant
+  );
+
+  // Soft-navigate the cal.diy page to the chosen variant. The booking pages read
+  // `?variant=` server-side, so router.push re-renders them into the new state
+  // with no full reload; the widget's patched pushState sync then re-derives
+  // liveVariant, re-scoping the checklist + tagging.
+  function switchVariant(key: string) {
+    if (key === currentVariant || typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    params.set("variant", key);
+    router.push(`${window.location.pathname}?${params.toString()}`);
+  }
 
   return (
     <div className="pmha-run" data-testid="pmhub-assistant.validation.runner">
@@ -1968,6 +2076,22 @@ function ValidationRunner({
           {pageItems.length} item{pageItems.length === 1 ? "" : "s"}
         </span>
       </div>
+
+      {screenVariants.length > 1 && (
+        <div className="pmha-vtabs" data-testid="pmhub-assistant.validation.variant-tabs">
+          {screenVariants.map((v) => (
+            <button
+              key={v.key}
+              type="button"
+              className={`pmha-vtab${v.key === currentVariant ? " pmha-vtab-on" : ""}`}
+              aria-pressed={v.key === currentVariant}
+              onClick={() => switchVariant(v.key)}
+              data-testid={`pmhub-assistant.validation.variant-${v.key}`}>
+              {v.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {data.checklist.length === 0 && (
         <div className="pmha-hint">
@@ -2004,16 +2128,6 @@ function ValidationRunner({
           ))}
         </div>
       )}
-
-      <ValidationComposer
-        projectId={projectId!}
-        screenRoute={screen?.route ?? route}
-        variantKey={currentVariant}
-        onPosted={(c) => {
-          setComments((arr) => [...arr, c]);
-          scrollToBottom();
-        }}
-      />
     </div>
   );
 }
@@ -2118,88 +2232,25 @@ function ValidationItemRow({
   );
 }
 
-function ValidationComposer({
-  projectId,
-  screenRoute,
-  variantKey,
-  onPosted,
-}: {
-  projectId: string;
-  screenRoute: string;
-  variantKey: string;
-  onPosted: (comment: ValidationComment) => void;
-}) {
-  const [body, setBody] = useState("");
-  const [kind, setKind] = useState<"comment" | "question">("comment");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-
-  async function send() {
-    const text = body.trim();
-    if (!text) return;
-    setBusy(true);
-    setErr("");
-    const res = await pmhubPost<{ ok: boolean; comment: ValidationComment }>("validation/comment", {
-      projectId,
-      screen_route: screenRoute,
-      variant_key: variantKey,
-      body: text,
-      kind,
-    });
-    setBusy(false);
-    if (res.ok && res.data?.comment) {
-      setBody("");
-      onPosted(res.data.comment);
-    } else {
-      setErr(res.ok ? "Couldn't post that." : res.error);
-    }
+/**
+ * Infer comment-vs-question from the text itself so the stakeholder never has to
+ * pick a mode (PM directive: "the chat should understand by itself"). A trailing
+ * "?" or a leading interrogative reads as a question; everything else is a
+ * comment. The kind is only the label the PM sees on the review surface, so a
+ * cheap heuristic is the right altitude here — no LLM round-trip for a tag.
+ */
+function detectValidationKind(text: string): "comment" | "question" {
+  const t = text.trim().toLowerCase();
+  if (!t) return "comment";
+  if (t.endsWith("?")) return "question";
+  if (
+    /^(why|what|what'?s|how|how'?s|when|where|who|which|whose|whom|is|are|am|do|does|did|can|could|should|would|will|won'?t|wouldn'?t|shouldn'?t|may|might|shall|have|has|had)\b/.test(
+      t
+    )
+  ) {
+    return "question";
   }
-
-  return (
-    <div className="pmha-vcomposer">
-      <div className="pmha-vkinds">
-        <button
-          type="button"
-          className="pmha-btn"
-          style={{ opacity: kind === "comment" ? 1 : 0.5 }}
-          onClick={() => setKind("comment")}>
-          Comment
-        </button>
-        <button
-          type="button"
-          className="pmha-btn"
-          style={{ opacity: kind === "question" ? 1 : 0.5 }}
-          onClick={() => setKind("question")}>
-          Question
-        </button>
-      </div>
-      <div className="pmha-inputrow">
-        <textarea
-          className="pmha-input"
-          placeholder={kind === "question" ? "Ask a question about this page…" : "Leave a comment on this page…"}
-          value={body}
-          rows={2}
-          onChange={(e) => setBody(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              void send();
-            }
-          }}
-          data-testid="pmhub-assistant.validation.input"
-        />
-        <button
-          type="button"
-          className="pmha-sendbtn pmha-grad"
-          disabled={busy || !body.trim()}
-          onClick={() => void send()}
-          data-testid="pmhub-assistant.validation.send">
-          <IconSend size={15} />
-        </button>
-      </div>
-      {err && <div className="pmha-hint">{err}</div>}
-    </div>
-  );
+  return "comment";
 }
 
 function TriageProposalCard({
@@ -2567,6 +2618,11 @@ function WidgetStyles() {
       .pmha-rt{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:650;color:var(--emph)}
       .pmha-rt svg{color:var(--accent)}
       .pmha-prog{font-size:11px;color:var(--sub);font-family:var(--mono),ui-monospace,monospace}
+      .pmha-vtabs{display:flex;flex-wrap:wrap;gap:6px;padding:9px 13px;border-bottom:1px solid var(--hair)}
+      .pmha-vtab{font:inherit;font-size:11.5px;font-weight:600;color:var(--sub);background:var(--subtle);
+        border:1px solid var(--hair);border-radius:999px;padding:3px 11px;cursor:pointer;transition:color .12s,background .12s,border-color .12s}
+      .pmha-vtab:hover{color:var(--emph);border-color:var(--accent)}
+      .pmha-vtab-on{color:var(--accent);background:var(--accentbg);border-color:var(--accent)}
       .pmha-step{display:flex;align-items:flex-start;gap:10px;padding:10px 13px;border-bottom:1px solid var(--hair)}
       .pmha-pass{width:20px;height:20px;border-radius:6px;border:1.5px solid var(--hair);background:transparent;
         display:grid;place-items:center;cursor:pointer;flex:0 0 auto;margin-top:1px;color:transparent}
@@ -2640,8 +2696,8 @@ function WidgetStyles() {
       .pmha-pe:disabled{opacity:.45;cursor:default}
       .pmha-pe:disabled:hover{color:var(--sub);border-color:var(--hair)}
 
-      .pmha-vcomposer{margin-top:10px}
-      .pmha-vkinds{display:flex;gap:6px;margin-bottom:6px}
+      .pmha-vhint{font-size:10.5px;color:var(--sub);margin-top:6px;padding-left:3px}
+      .pmha-vsent{color:var(--green);font-weight:600}
       .pmha-vcomment{font-size:12px;color:var(--emph);border:1px solid var(--hair);background:var(--card);
         border-radius:9px;padding:7px 10px;margin-top:6px;line-height:1.45}
 

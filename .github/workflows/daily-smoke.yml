@@ -1,0 +1,57 @@
+name: Daily production smoke
+
+# Checks the LIVE site, not this commit. Independent of the heavy e2e suite in
+# e2e.yml, which needs a database and ~20 secrets — this one needs neither, so
+# it keeps reporting even when the build is red.
+on:
+  schedule:
+    # 06:00 UTC = 08:00 Europe/Zurich (07:00 in winter).
+    - cron: "0 6 * * *"
+  # ...and on demand, from the Actions tab.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Public booking flow
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: e2e-smoke
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # One package, no lockfile, no monorepo install. Seconds, not minutes.
+      - name: Install Playwright
+        run: npm install --no-package-lock
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run smoke tests
+        run: npx playwright test
+        env:
+          # Unset variable arrives as "" — the config falls back to prod.
+          SMOKE_BASE_URL: ${{ vars.SMOKE_BASE_URL }}
+
+      # `always()` so a FAILING run still uploads its trace. Without this the
+      # only run you'd want evidence from is the one that uploads nothing.
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-report
+          path: |
+            e2e-smoke/report.json
+            e2e-smoke/playwright-report/
+            e2e-smoke/test-results/
+          retention-days: 30
+          if-no-files-found: ignore
